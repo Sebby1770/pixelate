@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pixelate"
+version = "1.0.0"
+description = "A retro pixel art converter CLI with classic gaming palettes, dithering, and CRT effects."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Seb", email = "sebforbes03@gmail.com" }
+]
+keywords = ["pixel-art", "retro", "gameboy", "nes", "ascii-art", "cli", "image-processing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Artistic Software",
+]
+dependencies = [
+    "Pillow>=10.0.0",
+    "numpy>=1.24.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+pixelate = "pixelate.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/Sebby1770/pixelate"
+Issues = "https://github.com/Sebby1770/pixelate/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pixelate*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
