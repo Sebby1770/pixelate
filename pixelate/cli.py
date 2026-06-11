@@ -108,16 +108,19 @@ def convert_cmd(
         transient=True,
     ) as progress:
         task = progress.add_task("[green]Pixelating...", total=None)
-        result = pixelate_image(
-            input_path,
-            palette=palette,
-            pixel_size=pixel_size,
-            dither=dither,
-            upscale=upscale,
-            saturation=saturation,
-            crt=crt,
-            scanlines=scanlines,
-        )
+        try:
+            result = pixelate_image(
+                input_path,
+                palette=palette,
+                pixel_size=pixel_size,
+                dither=dither,
+                upscale=upscale,
+                saturation=saturation,
+                crt=crt,
+                scanlines=scanlines,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
         progress.update(task, completed=1, total=1)
 
     saved = save_image(result, output_path)
@@ -139,13 +142,16 @@ def convert_cmd(
 def ascii_cmd(input_path: Path, width: int, ramp: str, color: bool,
               invert: bool, output_path: Path | None) -> None:
     """Render IMAGE as ASCII / ANSI art."""
-    art = image_to_ascii(
-        input_path,
-        width=width,
-        ramp=ramp,
-        color=color,
-        invert=invert,
-    )
+    try:
+        art = image_to_ascii(
+            input_path,
+            width=width,
+            ramp=ramp,
+            color=color,
+            invert=invert,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(art)
     if output_path:
         saved = save_ascii(art, output_path)

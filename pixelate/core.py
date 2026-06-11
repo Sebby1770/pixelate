@@ -18,6 +18,7 @@ import numpy as np
 from PIL import Image
 
 from pixelate.dithering import get_dither
+from pixelate.image_safety import load_rgb_image
 from pixelate.palettes import get_palette
 
 
@@ -80,12 +81,15 @@ def pixelate_image(
     PIL.Image
         The pixel-art result, ready to save or display.
     """
+    if pixel_size < 1:
+        raise ValueError("pixel_size must be at least 1.")
+    if upscale < 1:
+        raise ValueError("upscale must be at least 1.")
+    if saturation < 0:
+        raise ValueError("saturation must not be negative.")
+
     # --- Load -----------------------------------------------------------
-    if isinstance(src, (str, Path)):
-        img = Image.open(src)
-    else:
-        img = src
-    img = img.convert("RGB")
+    img = load_rgb_image(src)
 
     # --- Pre-process ----------------------------------------------------
     img = _adjust_saturation(img, saturation)
