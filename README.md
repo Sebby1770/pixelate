@@ -40,6 +40,7 @@ Modern image filters smooth everything out. PIXELATE goes the other way — it c
 - **ASCII / ANSI mode** — render any image as colored terminal art.
 - **Beautifully retro CLI** — green-on-black banner, palette previews, swatches, progress bars.
 - **Clean Python API** — use it in your own scripts.
+- **Input safety checks** — refuses empty or excessively large source images before expensive processing.
 
 ## Install
 

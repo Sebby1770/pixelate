@@ -15,6 +15,8 @@ from typing import Union
 import numpy as np
 from PIL import Image
 
+from pixelate.image_safety import load_rgb_image
+
 # Ramps go dark -> light. Pick the one that suits your terminal background.
 RAMPS = {
     "dense": "@%#*+=-:. ",
@@ -48,11 +50,14 @@ def image_to_ascii(
     invert : bool
         Reverse the ramp (useful for light terminal backgrounds).
     """
-    if isinstance(src, (str, Path)):
-        img = Image.open(src)
-    else:
-        img = src
-    img = img.convert("RGB")
+    if width < 1:
+        raise ValueError("ASCII width must be at least 1.")
+
+    chars = RAMPS.get(ramp, ramp)
+    if not chars:
+        raise ValueError("ASCII ramp must contain at least one character.")
+
+    img = load_rgb_image(src)
 
     # Compensate for terminal cell aspect (chars are ~2:1 tall:wide)
     w_orig, h_orig = img.size
@@ -62,7 +67,6 @@ def image_to_ascii(
     arr = np.array(img)
     gray = (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2])
 
-    chars = RAMPS.get(ramp, ramp)
     if invert:
         chars = chars[::-1]
 
