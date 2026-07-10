@@ -9,7 +9,12 @@ to preserve perceived detail.
 
 from __future__ import annotations
 
+from typing import Callable, List, Tuple
+
 import numpy as np
+
+# (dy, dx, weight) — error distribution kernels
+Kernel = List[Tuple[int, int, float]]
 
 
 def _nearest_color(pixel: np.ndarray, palette: np.ndarray) -> np.ndarray:
@@ -31,13 +36,8 @@ def quantize_no_dither(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
     return out
 
 
-def floyd_steinberg(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
-    """
-    Floyd-Steinberg error diffusion dithering.
-
-    Diffuses quantization error to neighboring pixels using the classic
-    7/16, 3/16, 5/16, 1/16 distribution.
-    """
+def _error_diffuse(image: np.ndarray, palette: np.ndarray, kernel: Kernel) -> np.ndarray:
+    """Generic error-diffusion dither using an (dy, dx, weight) kernel."""
     img = image.astype(np.float32).copy()
     h, w, _ = img.shape
 
@@ -48,16 +48,28 @@ def floyd_steinberg(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
             img[y, x] = new
             error = old - new
 
-            if x + 1 < w:
-                img[y, x + 1] += error * (7 / 16)
-            if y + 1 < h:
-                if x > 0:
-                    img[y + 1, x - 1] += error * (3 / 16)
-                img[y + 1, x] += error * (5 / 16)
-                if x + 1 < w:
-                    img[y + 1, x + 1] += error * (1 / 16)
+            for dy, dx, weight in kernel:
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < h and 0 <= nx < w:
+                    img[ny, nx] += error * weight
 
     return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def floyd_steinberg(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
+    """
+    Floyd-Steinberg error diffusion dithering.
+
+    Diffuses quantization error to neighboring pixels using the classic
+    7/16, 3/16, 5/16, 1/16 distribution.
+    """
+    kernel: Kernel = [
+        (0, 1, 7 / 16),
+        (1, -1, 3 / 16),
+        (1, 0, 5 / 16),
+        (1, 1, 1 / 16),
+    ]
+    return _error_diffuse(image, palette, kernel)
 
 
 def atkinson(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
@@ -85,6 +97,68 @@ def atkinson(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
                     img[ny, nx] += error
 
     return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def stucki(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
+    """
+    Stucki error diffusion dithering.
+
+    A wider kernel than Floyd-Steinberg (div 42) that produces smoother
+    gradients with less directional artifacts.
+    """
+    kernel: Kernel = [
+        (0, 1, 8 / 42),
+        (0, 2, 4 / 42),
+        (1, -2, 2 / 42),
+        (1, -1, 4 / 42),
+        (1, 0, 8 / 42),
+        (1, 1, 4 / 42),
+        (1, 2, 2 / 42),
+        (2, -2, 1 / 42),
+        (2, -1, 2 / 42),
+        (2, 0, 4 / 42),
+        (2, 1, 2 / 42),
+        (2, 2, 1 / 42),
+    ]
+    return _error_diffuse(image, palette, kernel)
+
+
+def burkes(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
+    """
+    Burkes error diffusion dithering.
+
+    A simplified Stucki-style kernel (div 32) — only two rows, good balance
+    of quality and speed.
+    """
+    kernel: Kernel = [
+        (0, 1, 8 / 32),
+        (0, 2, 4 / 32),
+        (1, -2, 2 / 32),
+        (1, -1, 4 / 32),
+        (1, 0, 8 / 32),
+        (1, 1, 4 / 32),
+        (1, 2, 2 / 32),
+    ]
+    return _error_diffuse(image, palette, kernel)
+
+
+def sierra(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
+    """
+    Sierra two-row (Sierra-2-4A / Filter Lite variant) error diffusion.
+
+    Diffuses error with a compact two-row kernel (div 16). Faster than full
+    Sierra-3 and Stucki while retaining good gradient quality.
+    """
+    kernel: Kernel = [
+        (0, 1, 4 / 16),
+        (0, 2, 3 / 16),
+        (1, -2, 1 / 16),
+        (1, -1, 2 / 16),
+        (1, 0, 3 / 16),
+        (1, 1, 2 / 16),
+        (1, 2, 1 / 16),
+    ]
+    return _error_diffuse(image, palette, kernel)
 
 
 def ordered_bayer(image: np.ndarray, palette: np.ndarray, matrix_size: int = 4) -> np.ndarray:
@@ -124,15 +198,18 @@ def ordered_bayer(image: np.ndarray, palette: np.ndarray, matrix_size: int = 4) 
     return quantize_no_dither(img, palette)
 
 
-DITHER_ALGORITHMS = {
+DITHER_ALGORITHMS: dict[str, Callable[..., np.ndarray]] = {
     "none": quantize_no_dither,
     "floyd": floyd_steinberg,
     "atkinson": atkinson,
     "bayer": ordered_bayer,
+    "stucki": stucki,
+    "burkes": burkes,
+    "sierra": sierra,
 }
 
 
-def get_dither(name: str):
+def get_dither(name: str) -> Callable[..., np.ndarray]:
     """Return a dithering function by name."""
     key = name.lower().strip()
     if key not in DITHER_ALGORITHMS:

@@ -7,6 +7,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from pixelate import __version__
+
 console = Console()
 
 
@@ -19,14 +21,13 @@ BANNER = r"""
 ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
 """
 
-TAGLINE = "  retro pixel art from any image  ·  v1.0.0"
-
 
 def print_banner() -> None:
     """Print the PIXELATE banner with a retro CRT-green glow."""
     text = Text(BANNER, style="bold green")
     console.print(text)
-    console.print(Text(TAGLINE, style="dim cyan"))
+    tagline = f"  retro pixel art from any image  ·  v{__version__}"
+    console.print(Text(tagline, style="dim cyan"))
     console.print()
 
 
@@ -55,9 +56,15 @@ def print_palette_table(palettes: dict) -> None:
         "mono-green": "Phosphor green CRT",
         "mono-amber": "Amber CRT",
         "grayscale": "9-step grayscale",
+        "ega": "IBM EGA 16-color",
+        "msx": "MSX Screen 2",
+        "sms": "Sega Master System",
+        "master-system": "Sega Master System (alias)",
+        "db16": "DawnBringer 16",
+        "vaporwave": "Aesthetic vaporwave",
     }
 
-    for name, count in palettes.items():
+    for name, count in sorted(palettes.items()):
         table.add_row(name, str(count), vibes.get(name, ""))
     console.print(table)
 

@@ -39,3 +39,24 @@ def test_gameboy_dmg_is_authentic():
     palette = get_palette("gameboy")
     # The classic DMG palette has the lightest yellow-green
     assert (155, 188, 15) in palette
+
+
+def test_new_palettes_present():
+    for name in ("ega", "msx", "vaporwave", "db16", "sms", "master-system"):
+        assert name in PALETTES
+
+
+def test_ega_has_16_colors():
+    assert len(get_palette("ega")) == 16
+
+
+def test_db16_has_16_colors():
+    assert len(get_palette("db16")) == 16
+
+
+def test_sms_alias_matches_master_system():
+    assert get_palette("sms") == get_palette("master-system")
+
+
+def test_vaporwave_has_colors():
+    assert len(get_palette("vaporwave")) >= 8
