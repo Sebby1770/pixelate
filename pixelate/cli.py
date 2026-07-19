@@ -7,12 +7,16 @@ from typing import Optional
 
 import click
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.table import Table
 
 from pixelate import __version__
 from pixelate.animation import is_animated, pixelate_animation
 from pixelate.ascii_art import RAMPS, image_to_ascii, save_ascii
 from pixelate.core import (
     collect_images,
+    color_usage_report,
+    compare_palettes,
+    extract_palette,
     make_spritesheet,
     pixelate_image,
     resolve_palette,
@@ -39,13 +43,27 @@ def _common_convert_options(fn):
             "-p", "--palette",
             default="gameboy",
             show_default=True,
-            help="Built-in palette name (ignored if --palette-file is set).",
+            help="Built-in palette name, or 'auto' to extract from the image.",
         ),
         click.option(
             "--palette-file",
             type=click.Path(exists=True, dir_okay=False, path_type=Path),
             default=None,
             help="Custom palette file (.hex or .gpl).",
+        ),
+        click.option(
+            "--colors",
+            type=click.IntRange(2, 256),
+            default=16,
+            show_default=True,
+            help="Color count when --palette auto.",
+        ),
+        click.option(
+            "--extract-method",
+            type=click.Choice(["kmeans", "median-cut"], case_sensitive=False),
+            default="kmeans",
+            show_default=True,
+            help="Auto-palette extraction algorithm.",
         ),
         click.option(
             "-s", "--pixel-size",
@@ -69,14 +87,35 @@ def _common_convert_options(fn):
             help="How many output pixels per logical pixel.",
         ),
         click.option(
+            "--scale",
+            type=click.IntRange(1, 32),
+            default=1,
+            show_default=True,
+            help="Extra nearest-neighbor upscale after pixelate (chunky pixels).",
+        ),
+        click.option(
             "--saturation",
             type=click.FloatRange(0.0, 3.0),
             default=1.2,
             show_default=True,
             help="Saturation boost applied before quantization.",
         ),
+        click.option(
+            "--contrast",
+            type=click.FloatRange(0.0, 3.0),
+            default=1.0,
+            show_default=True,
+            help="Contrast multiplier before quantization.",
+        ),
+        click.option("--invert", is_flag=True, help="Invert colors before palette."),
+        click.option("--edges", is_flag=True, help="Edge-aware sharpen pre-pass."),
         click.option("--crt", is_flag=True, help="Apply CRT glow + vignette."),
         click.option("--scanlines", is_flag=True, help="Overlay horizontal scanlines."),
+        click.option(
+            "--report",
+            is_flag=True,
+            help="Print color-usage report (palette color pixel counts).",
+        ),
     ]
     for opt in reversed(options):
         fn = opt(fn)
@@ -86,6 +125,8 @@ def _common_convert_options(fn):
 def _validate_palette_name(palette: str, palette_file: Optional[Path]) -> None:
     if palette_file is not None:
         return
+    if palette.lower().strip() == "auto":
+        return
     # Allow path-as-palette or registered name
     p = Path(palette)
     if p.is_file():
@@ -94,19 +135,80 @@ def _validate_palette_name(palette: str, palette_file: Optional[Path]) -> None:
         available = ", ".join(sorted(PALETTES))
         raise click.ClickException(
             f"Unknown palette '{palette}'. Available: {available}\n"
-            "Or pass a .hex/.gpl file with --palette-file."
+            "Or pass 'auto', or a .hex/.gpl file with --palette-file."
         )
 
 
-def _palette_label(palette: str, palette_file: Optional[Path]) -> str:
+def _palette_label(
+    palette: str,
+    palette_file: Optional[Path],
+    colors: int = 16,
+) -> str:
     if palette_file is not None:
-        colors = load_palette_file(palette_file)
-        return f"file:{palette_file.name} ({len(colors)} colors)"
+        loaded = load_palette_file(palette_file)
+        return f"file:{palette_file.name} ({len(loaded)} colors)"
+    if palette.lower().strip() == "auto":
+        return f"auto ({colors} colors)"
     try:
-        colors = resolve_palette(palette)
-        return f"{palette} ({len(colors)} colors)"
+        resolved = resolve_palette(palette)
+        return f"{palette} ({len(resolved)} colors)"
     except Exception:
         return palette
+
+
+def _print_color_report(result, palette_colors) -> None:
+    """Print a rich table of palette color usage for a converted image."""
+    report = color_usage_report(result, palette=palette_colors)
+    table = Table(
+        title="[bold cyan]Color usage report[/bold cyan]",
+        border_style="green",
+        header_style="bold magenta",
+    )
+    table.add_column("RGB", style="cyan")
+    table.add_column("Swatch", justify="center")
+    table.add_column("Pixels", style="yellow", justify="right")
+    table.add_column("%", style="white", justify="right")
+
+    for (r, g, b), count, pct in report:
+        swatch = f"\x1b[48;2;{r};{g};{b}m    \x1b[0m"
+        table.add_row(f"({r:3d},{g:3d},{b:3d})", swatch, f"{count:,}", f"{pct:5.1f}%")
+
+    console.print()
+    console.print(table)
+
+
+def _convert_kwargs(
+    palette: str,
+    palette_file: Path | None,
+    pixel_size: int,
+    dither: str,
+    upscale: int,
+    saturation: float,
+    crt: bool,
+    scanlines: bool,
+    colors: int = 16,
+    extract_method: str = "kmeans",
+    scale: int = 1,
+    edges: bool = False,
+    invert: bool = False,
+    contrast: float = 1.0,
+) -> dict:
+    return dict(
+        palette=palette,
+        pixel_size=pixel_size,
+        dither=dither,
+        upscale=upscale,
+        saturation=saturation,
+        crt=crt,
+        scanlines=scanlines,
+        palette_file=palette_file,
+        colors=colors,
+        extract_method=extract_method,
+        scale=scale,
+        edges=edges,
+        invert=invert,
+        contrast=contrast,
+    )
 
 
 @click.group(invoke_without_command=True)
@@ -133,12 +235,19 @@ def convert_cmd(
     output_path: Path | None,
     palette: str,
     palette_file: Path | None,
+    colors: int,
+    extract_method: str,
     pixel_size: int,
     dither: str,
     upscale: int,
+    scale: int,
     saturation: float,
+    contrast: float,
+    invert: bool,
+    edges: bool,
     crt: bool,
     scanlines: bool,
+    report: bool,
 ) -> None:
     """Convert IMAGE to retro pixel art (auto-detects animated GIF/WebP)."""
     print_banner()
@@ -156,15 +265,26 @@ def convert_cmd(
         effects.append("CRT")
     if scanlines:
         effects.append("scanlines")
+    if edges:
+        effects.append("edges")
+    if invert:
+        effects.append("invert")
     effects_str = " ".join(effects) if effects else "none"
+
+    kwargs = _convert_kwargs(
+        palette, palette_file, pixel_size, dither, upscale, saturation,
+        crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
+    )
 
     info_panel(
         "[bold]Converting[/bold]",
         (
             f"[cyan]Source:[/cyan]    {input_path}\n"
-            f"[cyan]Palette:[/cyan]   [yellow]{_palette_label(palette, palette_file)}[/yellow]\n"
-            f"[cyan]Resolution:[/cyan] {pixel_size}px (longest side) × {upscale}× upscale\n"
+            f"[cyan]Palette:[/cyan]   [yellow]{_palette_label(palette, palette_file, colors)}[/yellow]\n"
+            f"[cyan]Resolution:[/cyan] {pixel_size}px × {upscale}× upscale"
+            f"{f' × {scale}× scale' if scale > 1 else ''}\n"
             f"[cyan]Dither:[/cyan]    {dither}\n"
+            f"[cyan]Contrast:[/cyan]  {contrast}\n"
             f"[cyan]Animated:[/cyan]  {'yes' if animated else 'no'}\n"
             f"[cyan]Effects:[/cyan]   {effects_str}"
         ),
@@ -181,31 +301,13 @@ def convert_cmd(
         if animated:
             result = pixelate_animation(
                 input_path,
-                palette=palette,
-                pixel_size=pixel_size,
-                dither=dither,
-                upscale=upscale,
-                saturation=saturation,
-                crt=crt,
-                scanlines=scanlines,
-                palette_file=palette_file,
                 output=output_path,
+                **kwargs,
             )
-            # result is first frame Image when output is set
             size_label = f"{result.size[0]}×{result.size[1]}"
             saved = output_path
         else:
-            result = pixelate_image(
-                input_path,
-                palette=palette,
-                pixel_size=pixel_size,
-                dither=dither,
-                upscale=upscale,
-                saturation=saturation,
-                crt=crt,
-                scanlines=scanlines,
-                palette_file=palette_file,
-            )
+            result = pixelate_image(input_path, **kwargs)
             saved = save_image(result, output_path)
             size_label = f"{result.size[0]}×{result.size[1]}"
         progress.update(task, completed=1, total=1)
@@ -214,6 +316,19 @@ def convert_cmd(
         f"[bold green]✓[/bold green] Saved: [cyan]{saved}[/cyan]  "
         f"[dim]({size_label}{' animated' if animated else ''})[/dim]"
     )
+
+    if report and not animated:
+        # Resolve palette used for report
+        if palette_file is not None:
+            pal = resolve_palette(palette, palette_file=palette_file)
+        elif palette.lower().strip() == "auto":
+            # Re-extract for report labels (result already quantized)
+            from PIL import Image as PILImage
+            src_img = PILImage.open(input_path).convert("RGB")
+            pal = extract_palette(src_img, n=colors, method=extract_method)
+        else:
+            pal = resolve_palette(palette)
+        _print_color_report(result, pal)
 
 
 @cli.command("batch")
@@ -232,12 +347,19 @@ def batch_cmd(
     recursive: bool,
     palette: str,
     palette_file: Path | None,
+    colors: int,
+    extract_method: str,
     pixel_size: int,
     dither: str,
     upscale: int,
+    scale: int,
     saturation: float,
+    contrast: float,
+    invert: bool,
+    edges: bool,
     crt: bool,
     scanlines: bool,
+    report: bool,  # accepted but not printed per-file in batch
 ) -> None:
     """Batch-convert all images in INPUT_DIR into OUTPUT_DIR."""
     print_banner()
@@ -248,6 +370,10 @@ def batch_cmd(
         raise click.ClickException(f"No images found in {input_dir}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    kwargs = _convert_kwargs(
+        palette, palette_file, pixel_size, dither, upscale, saturation,
+        crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
+    )
 
     info_panel(
         "[bold]Batch convert[/bold]",
@@ -255,7 +381,7 @@ def batch_cmd(
             f"[cyan]Input:[/cyan]     {input_dir}\n"
             f"[cyan]Output:[/cyan]    {output_dir}\n"
             f"[cyan]Images:[/cyan]    {len(images)}\n"
-            f"[cyan]Palette:[/cyan]   [yellow]{_palette_label(palette, palette_file)}[/yellow]\n"
+            f"[cyan]Palette:[/cyan]   [yellow]{_palette_label(palette, palette_file, colors)}[/yellow]\n"
             f"[cyan]Dither:[/cyan]    {dither}"
         ),
     )
@@ -279,34 +405,13 @@ def batch_cmd(
                 if is_animated(src):
                     dest = output_dir / Path(rel).with_name(out_name + ".gif")
                     dest.parent.mkdir(parents=True, exist_ok=True)
-                    pixelate_animation(
-                        src,
-                        palette=palette,
-                        pixel_size=pixel_size,
-                        dither=dither,
-                        upscale=upscale,
-                        saturation=saturation,
-                        crt=crt,
-                        scanlines=scanlines,
-                        palette_file=palette_file,
-                        output=dest,
-                    )
+                    pixelate_animation(src, output=dest, **kwargs)
                 else:
                     dest = output_dir / Path(rel).with_name(out_name + src.suffix.lower())
                     if dest.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
                         dest = dest.with_suffix(".png")
                     dest.parent.mkdir(parents=True, exist_ok=True)
-                    result = pixelate_image(
-                        src,
-                        palette=palette,
-                        pixel_size=pixel_size,
-                        dither=dither,
-                        upscale=upscale,
-                        saturation=saturation,
-                        crt=crt,
-                        scanlines=scanlines,
-                        palette_file=palette_file,
-                    )
+                    result = pixelate_image(src, **kwargs)
                     save_image(result, dest)
                 ok += 1
             except Exception as exc:  # noqa: BLE001 — report and continue batch
@@ -316,6 +421,8 @@ def batch_cmd(
     console.print(f"[bold green]✓[/bold green] Converted {ok}/{len(images)} images → [cyan]{output_dir}[/cyan]")
     for err in errors:
         console.print(f"[bold red]✗[/bold red] {err}")
+    if report:
+        console.print("[dim]Note: --report is shown on single convert, not batch.[/dim]")
 
 
 @cli.command("sheet")
@@ -356,12 +463,19 @@ def sheet_cmd(
     convert: bool,
     palette: str,
     palette_file: Path | None,
+    colors: int,
+    extract_method: str,
     pixel_size: int,
     dither: str,
     upscale: int,
+    scale: int,
     saturation: float,
+    contrast: float,
+    invert: bool,
+    edges: bool,
     crt: bool,
     scanlines: bool,
+    report: bool,
 ) -> None:
     """Stitch images (or a directory) into a spritesheet.
 
@@ -376,13 +490,18 @@ def sheet_cmd(
     if not files:
         raise click.ClickException("No images found for spritesheet")
 
+    kwargs = _convert_kwargs(
+        palette, palette_file, pixel_size, dither, upscale, saturation,
+        crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
+    )
+
     info_panel(
         "[bold]Spritesheet[/bold]",
         (
             f"[cyan]Inputs:[/cyan]    {len(files)} images\n"
             f"[cyan]Columns:[/cyan]   {cols}\n"
             f"[cyan]Convert:[/cyan]   {'yes' if convert else 'no (stitch as-is)'}\n"
-            f"[cyan]Palette:[/cyan]   [yellow]{_palette_label(palette, palette_file)}[/yellow]\n"
+            f"[cyan]Palette:[/cyan]   [yellow]{_palette_label(palette, palette_file, colors)}[/yellow]\n"
             f"[cyan]Output:[/cyan]    {output_path}"
         ),
     )
@@ -401,17 +520,7 @@ def sheet_cmd(
 
         for src in files:
             if convert:
-                tile = pixelate_image(
-                    src,
-                    palette=palette,
-                    pixel_size=pixel_size,
-                    dither=dither,
-                    upscale=upscale,
-                    saturation=saturation,
-                    crt=crt,
-                    scanlines=scanlines,
-                    palette_file=palette_file,
-                )
+                tile = pixelate_image(src, **kwargs)
             else:
                 tile = Image.open(src).convert("RGB")
             tiles.append(tile)
@@ -422,6 +531,106 @@ def sheet_cmd(
     console.print(
         f"[bold green]✓[/bold green] Spritesheet: [cyan]{saved}[/cyan]  "
         f"[dim]({sheet.size[0]}×{sheet.size[1]}, {len(tiles)} tiles)[/dim]"
+    )
+
+
+@cli.command("compare")
+@click.argument("input_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option(
+    "--palettes",
+    "palette_list",
+    default="gameboy,nes,pico8,c64",
+    show_default=True,
+    help="Comma-separated palette names to compare.",
+)
+@click.option(
+    "-o", "--output", "output_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Output collage path. Default: <input>_compare.png",
+)
+@click.option(
+    "-s", "--pixel-size",
+    type=click.IntRange(8, 1024),
+    default=64,
+    show_default=True,
+)
+@click.option(
+    "-d", "--dither",
+    type=click.Choice(_dither_choices(), case_sensitive=False),
+    default="floyd",
+    show_default=True,
+)
+@click.option(
+    "-u", "--upscale",
+    type=click.IntRange(1, 16),
+    default=2,
+    show_default=True,
+)
+@click.option(
+    "--cols",
+    type=click.IntRange(1, 16),
+    default=None,
+    help="Grid columns (default: auto, max 4).",
+)
+@click.option("--no-label", is_flag=True, help="Hide palette name labels.")
+def compare_cmd(
+    input_path: Path,
+    palette_list: str,
+    output_path: Path | None,
+    pixel_size: int,
+    dither: str,
+    upscale: int,
+    cols: int | None,
+    no_label: bool,
+) -> None:
+    """Compare multiple palettes on one image (labeled collage)."""
+    print_banner()
+    names = [n.strip() for n in palette_list.split(",") if n.strip()]
+    if not names:
+        raise click.ClickException("No palettes specified. Use --palettes gameboy,nes,...")
+
+    for name in names:
+        if name.lower() not in PALETTES and name.lower() != "auto":
+            p = Path(name)
+            if not p.is_file():
+                raise click.ClickException(
+                    f"Unknown palette '{name}'. Run `pixelate palettes` for the list."
+                )
+
+    if output_path is None:
+        output_path = input_path.with_name(f"{input_path.stem}_compare.png")
+
+    info_panel(
+        "[bold]Palette compare[/bold]",
+        (
+            f"[cyan]Source:[/cyan]   {input_path}\n"
+            f"[cyan]Palettes:[/cyan] [yellow]{', '.join(names)}[/yellow]\n"
+            f"[cyan]Output:[/cyan]   {output_path}"
+        ),
+    )
+
+    with Progress(
+        SpinnerColumn(style="green"),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        progress.add_task("[green]Building collage...", total=None)
+        collage = compare_palettes(
+            input_path,
+            names,
+            pixel_size=pixel_size,
+            dither=dither,
+            upscale=upscale,
+            cols=cols,
+            label=not no_label,
+        )
+        saved = save_image(collage, output_path)
+
+    console.print(
+        f"[bold green]✓[/bold green] Compare grid: [cyan]{saved}[/cyan]  "
+        f"[dim]({collage.size[0]}×{collage.size[1]}, {len(names)} palettes)[/dim]"
     )
 
 

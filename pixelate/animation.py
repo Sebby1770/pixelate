@@ -76,6 +76,12 @@ def pixelate_animation(
     scanlines: bool = False,
     palette_file: Optional[Union[str, Path]] = None,
     output: Optional[PathLike] = None,
+    colors: int = 16,
+    extract_method: str = "kmeans",
+    scale: int = 1,
+    edges: bool = False,
+    invert: bool = False,
+    contrast: float = 1.0,
 ) -> Union[Image.Image, Tuple[FrameList, DurationList]]:
     """
     Pixelate every frame of an animated (or still) image.
@@ -86,6 +92,8 @@ def pixelate_animation(
         Path or PIL Image (animated GIF/WebP or still).
     palette, pixel_size, dither, upscale, saturation, crt, scanlines, palette_file :
         Forwarded to :func:`pixelate.core.pixelate_image` for each frame.
+    colors, extract_method, scale, edges, invert, contrast :
+        Additional v2.1 pipeline options forwarded per frame.
     output :
         If given, save an animated GIF to this path and return the first
         frame image (for convenience). If ``None``, return
@@ -99,11 +107,24 @@ def pixelate_animation(
     """
     source_frames, durations = load_frames(src)
 
+    # For auto palette, extract once from the first frame so colors stay stable
+    palette_arg: Union[str, Sequence] = palette
+    if (
+        palette_file is None
+        and isinstance(palette, str)
+        and palette.lower().strip() == "auto"
+        and source_frames
+    ):
+        from pixelate.core import extract_palette
+        palette_arg = extract_palette(
+            source_frames[0], n=colors, method=extract_method
+        )
+
     out_frames: FrameList = []
     for frame in source_frames:
         result = pixelate_image(
             frame,
-            palette=palette,
+            palette=palette_arg,
             pixel_size=pixel_size,
             dither=dither,
             upscale=upscale,
@@ -111,6 +132,12 @@ def pixelate_animation(
             crt=crt,
             scanlines=scanlines,
             palette_file=palette_file,
+            colors=colors,
+            extract_method=extract_method,
+            scale=scale,
+            edges=edges,
+            invert=invert,
+            contrast=contrast,
         )
         out_frames.append(result.convert("RGB"))
 
