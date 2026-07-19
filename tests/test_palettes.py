@@ -46,6 +46,21 @@ def test_new_palettes_present():
         assert name in PALETTES
 
 
+def test_v21_palettes_present():
+    for name in (
+        "gameboy-color",
+        "gbc",
+        "vic20",
+        "vic-20",
+        "atari2600",
+        "atari-2600",
+        "tokyo-night",
+        "tokyo",
+        "cyberpunk",
+    ):
+        assert name in PALETTES
+
+
 def test_ega_has_16_colors():
     assert len(get_palette("ega")) == 16
 
@@ -60,3 +75,24 @@ def test_sms_alias_matches_master_system():
 
 def test_vaporwave_has_colors():
     assert len(get_palette("vaporwave")) >= 8
+
+
+def test_gbc_alias_matches_gameboy_color():
+    assert get_palette("gbc") == get_palette("gameboy-color")
+    assert len(get_palette("gameboy-color")) == 32
+
+
+def test_vic20_has_16_colors():
+    assert len(get_palette("vic20")) == 16
+    assert get_palette("vic20") == get_palette("vic-20")
+
+
+def test_atari2600_has_colors():
+    assert len(get_palette("atari2600")) >= 16
+    assert get_palette("atari2600") == get_palette("atari-2600")
+
+
+def test_tokyo_night_and_cyberpunk():
+    assert len(get_palette("tokyo-night")) == 16
+    assert get_palette("tokyo") == get_palette("tokyo-night")
+    assert len(get_palette("cyberpunk")) == 16

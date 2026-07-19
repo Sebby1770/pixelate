@@ -46,8 +46,14 @@ def print_palette_table(palettes: dict) -> None:
     vibes = {
         "gameboy": "Original DMG green-yellow",
         "gameboy-pocket": "Pocket / Light grayscale-green",
+        "gameboy-color": "Game Boy Color (32-color sample)",
+        "gbc": "Game Boy Color (alias)",
         "nes": "Nintendo Entertainment System",
         "c64": "Commodore 64",
+        "vic20": "Commodore VIC-20",
+        "vic-20": "Commodore VIC-20 (alias)",
+        "atari2600": "Atari 2600 TIA subset",
+        "atari-2600": "Atari 2600 (alias)",
         "zx": "ZX Spectrum",
         "cga": "MS-DOS CGA",
         "pico8": "PICO-8 fantasy console",
@@ -62,6 +68,9 @@ def print_palette_table(palettes: dict) -> None:
         "master-system": "Sega Master System (alias)",
         "db16": "DawnBringer 16",
         "vaporwave": "Aesthetic vaporwave",
+        "tokyo-night": "Tokyo Night dark theme",
+        "tokyo": "Tokyo Night (alias)",
+        "cyberpunk": "Neon cyberpunk night",
     }
 
     for name, count in sorted(palettes.items()):

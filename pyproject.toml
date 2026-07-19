@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pixelate"
-version = "2.0.0"
-description = "A retro pixel art converter CLI with classic gaming palettes, dithering, CRT effects, animation, batch convert, and spritesheets."
+version = "2.1.0"
+description = "A retro pixel art converter CLI with classic gaming palettes, auto palette extraction, dithering, CRT effects, animation, batch convert, compare grids, and spritesheets."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
