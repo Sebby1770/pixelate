@@ -1,6 +1,7 @@
 """Tests for nearest-neighbor --scale and edge/invert/contrast flags."""
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from pixelate.core import nearest_scale, pixelate_image
@@ -29,11 +30,8 @@ def test_nearest_scale_one_is_noop_size():
 
 def test_nearest_scale_invalid():
     img = Image.new("RGB", (4, 4), (0, 0, 0))
-    try:
+    with pytest.raises(ValueError):
         nearest_scale(img, 0)
-        assert False, "expected ValueError"
-    except ValueError:
-        pass
 
 
 def test_pixelate_scale_extra():

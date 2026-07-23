@@ -7,7 +7,7 @@
 ██╔═══╝ ██║ ██╔██╗ ██╔══╝  ██║     ██╔══██║   ██║   ██╔══╝
 ██║     ██║██╔╝ ██╗███████╗███████╗██║  ██║   ██║   ███████╗
 ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
-        retro pixel art from any image  ·  v2.1.0
+        retro pixel art from any image  ·  v3.0.0
 ```
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
@@ -32,15 +32,19 @@
 
 Modern image filters smooth everything out. PIXELATE goes the other way — it crushes color depth down to the exact palettes used by the consoles and home computers of the 80s and 90s, dithers cleverly to preserve detail, and gives you a finished pixel-art image that looks like it shipped on a cartridge.
 
-## Features (v2.1)
+## Features (v3.0)
 
+- **Perceptual CIELAB matching** — `--color-space lab` matches colors the way the eye sees them, not raw RGB distance (better on skin tones and subtle gradients).
+- **Retro effects** — sprite `--outline`, `--posterize`, `--chromatic` aberration, NTSC `--color-bleed`, a sprite-editor `--grid`, plus CRT glow and scanlines.
+- **Save extracted palettes** — `pixelate extract IMAGE -o palette.gpl [--sheet swatches.png]` writes a `.gpl`/`.hex` palette (and an optional swatch sheet).
 - **Auto palette** — `--palette auto --colors N` extracts colors from the image (k-means or median-cut, numpy only).
 - **Palette compare grid** — side-by-side collage of multiple palettes with labels.
 - **Extra nearest scale** — `--scale N` for chunky display pixels after conversion.
 - **Edge pre-pass** — `--edges` sharpen/emboss-lite to keep outlines.
 - **Color usage report** — `--report` shows pixel counts per palette color.
 - **Invert / contrast** — quick pre-quantize tweaks.
-- **25+ retro palettes** — Game Boy DMG/Pocket/Color, NES, C64, VIC-20, Atari 2600, ZX Spectrum, CGA, PICO-8, Apple II, EGA, MSX, Sega Master System, DawnBringer 16, vaporwave, Tokyo Night, cyberpunk, sunset, mono phosphor, grayscale.
+- **30+ retro palettes** — Game Boy DMG/Pocket/Color, NES, C64, VIC-20, Atari 2600, Game Gear, Virtual Boy, Amstrad CPC, Teletext, ZX Spectrum, CGA, PICO-8, Apple II, EGA, MSX, Sega Master System, DawnBringer 16 & 32, vaporwave, Tokyo Night, cyberpunk, sunset, mono phosphor, grayscale.
+- **Typed & linted** — ruff + mypy clean, tested on Python 3.9–3.13.
 - **7 dithering algorithms** — Floyd-Steinberg, Atkinson, Ordered Bayer, Stucki, Burkes, Sierra (two-row), and flat quantization.
 - **Custom palette files** — load GIMP `.gpl` or `.hex` palettes via `--palette-file` or the Python API.
 - **Animated GIF / WebP** — multi-frame inputs are auto-detected; frame durations are preserved.
@@ -87,6 +91,29 @@ Auto palette from the image:
 pixelate convert photo.jpg --palette auto --colors 12 --dither floyd -o auto.png
 pixelate convert photo.jpg --palette auto --colors 8 --extract-method median-cut
 ```
+
+Perceptual CIELAB matching, and save an extracted palette to reuse:
+
+```bash
+pixelate convert photo.jpg --palette auto --colors 16 --color-space lab
+pixelate extract photo.jpg -o photo.gpl --colors 16 --sheet swatches.png
+```
+
+### Retro effects
+
+```bash
+pixelate convert sprite.png --palette nes --outline --grid
+pixelate convert photo.jpg --palette c64 --posterize 3 --chromatic --color-bleed
+```
+
+| Flag | Effect |
+|------|--------|
+| `--color-space lab` | Match in perceptual CIELAB instead of RGB |
+| `--posterize N` | Reduce to N bits/channel before quantizing |
+| `--outline` | 1px outline around the sprite (background auto-detected) |
+| `--grid` | Sprite-editor grid lines on the upscaled output |
+| `--chromatic` | Horizontal red/blue channel split (VHS fringe) |
+| `--color-bleed` | NTSC-style horizontal chroma bleed |
 
 Crank up the retro:
 

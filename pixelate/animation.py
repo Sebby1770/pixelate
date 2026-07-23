@@ -82,6 +82,12 @@ def pixelate_animation(
     edges: bool = False,
     invert: bool = False,
     contrast: float = 1.0,
+    color_space: str = "rgb",
+    posterize: Optional[int] = None,
+    grid: bool = False,
+    outline: bool = False,
+    chromatic: bool = False,
+    color_bleed: bool = False,
 ) -> Union[Image.Image, Tuple[FrameList, DurationList]]:
     """
     Pixelate every frame of an animated (or still) image.
@@ -138,6 +144,12 @@ def pixelate_animation(
             edges=edges,
             invert=invert,
             contrast=contrast,
+            color_space=color_space,
+            posterize=posterize,
+            grid=grid,
+            outline=outline,
+            chromatic=chromatic,
+            color_bleed=color_bleed,
         )
         out_frames.append(result.convert("RGB"))
 

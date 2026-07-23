@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import click
+from PIL import Image
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
@@ -109,6 +110,23 @@ def _common_convert_options(fn):
         ),
         click.option("--invert", is_flag=True, help="Invert colors before palette."),
         click.option("--edges", is_flag=True, help="Edge-aware sharpen pre-pass."),
+        click.option(
+            "--color-space",
+            type=click.Choice(["rgb", "lab"], case_sensitive=False),
+            default="rgb",
+            show_default=True,
+            help="Palette matching metric: rgb (fast) or lab (perceptual CIELAB).",
+        ),
+        click.option(
+            "--posterize",
+            type=click.IntRange(1, 8),
+            default=None,
+            help="Reduce to N bits per channel before quantizing.",
+        ),
+        click.option("--grid", is_flag=True, help="Overlay a sprite-editor pixel grid."),
+        click.option("--outline", is_flag=True, help="Draw a 1px outline around the sprite."),
+        click.option("--chromatic", is_flag=True, help="Split R/B channels (VHS fringe)."),
+        click.option("--color-bleed", is_flag=True, help="NTSC-style horizontal chroma bleed."),
         click.option("--crt", is_flag=True, help="Apply CRT glow + vignette."),
         click.option("--scanlines", is_flag=True, help="Overlay horizontal scanlines."),
         click.option(
@@ -192,6 +210,12 @@ def _convert_kwargs(
     edges: bool = False,
     invert: bool = False,
     contrast: float = 1.0,
+    color_space: str = "rgb",
+    posterize: int | None = None,
+    grid: bool = False,
+    outline: bool = False,
+    chromatic: bool = False,
+    color_bleed: bool = False,
 ) -> dict:
     return dict(
         palette=palette,
@@ -208,6 +232,12 @@ def _convert_kwargs(
         edges=edges,
         invert=invert,
         contrast=contrast,
+        color_space=color_space,
+        posterize=posterize,
+        grid=grid,
+        outline=outline,
+        chromatic=chromatic,
+        color_bleed=color_bleed,
     )
 
 
@@ -245,6 +275,12 @@ def convert_cmd(
     contrast: float,
     invert: bool,
     edges: bool,
+    color_space: str,
+    posterize: int | None,
+    grid: bool,
+    outline: bool,
+    chromatic: bool,
+    color_bleed: bool,
     crt: bool,
     scanlines: bool,
     report: bool,
@@ -274,6 +310,8 @@ def convert_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
+        color_space=color_space, posterize=posterize, grid=grid, outline=outline,
+        chromatic=chromatic, color_bleed=color_bleed,
     )
 
     info_panel(
@@ -304,6 +342,8 @@ def convert_cmd(
                 output=output_path,
                 **kwargs,
             )
+            # With output set, pixelate_animation returns the first frame Image.
+            assert isinstance(result, Image.Image)
             size_label = f"{result.size[0]}×{result.size[1]}"
             saved = output_path
         else:
@@ -357,6 +397,12 @@ def batch_cmd(
     contrast: float,
     invert: bool,
     edges: bool,
+    color_space: str,
+    posterize: int | None,
+    grid: bool,
+    outline: bool,
+    chromatic: bool,
+    color_bleed: bool,
     crt: bool,
     scanlines: bool,
     report: bool,  # accepted but not printed per-file in batch
@@ -373,6 +419,8 @@ def batch_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
+        color_space=color_space, posterize=posterize, grid=grid, outline=outline,
+        chromatic=chromatic, color_bleed=color_bleed,
     )
 
     info_panel(
@@ -473,6 +521,12 @@ def sheet_cmd(
     contrast: float,
     invert: bool,
     edges: bool,
+    color_space: str,
+    posterize: int | None,
+    grid: bool,
+    outline: bool,
+    chromatic: bool,
+    color_bleed: bool,
     crt: bool,
     scanlines: bool,
     report: bool,
@@ -493,6 +547,8 @@ def sheet_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
+        color_space=color_space, posterize=posterize, grid=grid, outline=outline,
+        chromatic=chromatic, color_bleed=color_bleed,
     )
 
     info_panel(
@@ -719,6 +775,96 @@ def preview_cmd(palette_name: str) -> None:
     click.echo("".join(line))
     click.echo("".join(line))  # double-row for chunkier swatches
     click.echo()
+
+
+@cli.command("extract")
+@click.argument("input_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option(
+    "-o", "--output", "output_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Palette file to write (.gpl or .hex). Default: <input>_palette.gpl.",
+)
+@click.option(
+    "--colors",
+    type=click.IntRange(2, 256),
+    default=16,
+    show_default=True,
+    help="Number of colors to extract.",
+)
+@click.option(
+    "--extract-method",
+    type=click.Choice(["kmeans", "median-cut"], case_sensitive=False),
+    default="kmeans",
+    show_default=True,
+    help="Extraction algorithm.",
+)
+@click.option(
+    "--sheet", "sheet_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Also render a swatch-sheet PNG of the extracted palette.",
+)
+def extract_cmd(
+    input_path: Path,
+    output_path: Path | None,
+    colors: int,
+    extract_method: str,
+    sheet_path: Path | None,
+) -> None:
+    """Extract a palette from IMAGE and save it as a .gpl/.hex file."""
+    from PIL import Image
+
+    from pixelate.palette_io import save_gpl, save_hex
+
+    print_banner()
+    if output_path is None:
+        output_path = input_path.with_name(f"{input_path.stem}_palette.gpl")
+
+    palette = extract_palette(Image.open(input_path), n=colors, method=extract_method)
+    suffix = output_path.suffix.lower()
+    if suffix == ".hex":
+        saved = save_hex(output_path, palette)
+    elif suffix == ".gpl":
+        saved = save_gpl(output_path, palette, name=input_path.stem)
+    else:
+        raise click.ClickException(
+            f"Unsupported palette extension '{suffix}'; use .gpl or .hex."
+        )
+
+    info_panel(
+        "[bold]Extracted palette[/bold]",
+        (
+            f"[cyan]Source:[/cyan]  {input_path}\n"
+            f"[cyan]Method:[/cyan]  {extract_method}\n"
+            f"[cyan]Colors:[/cyan]  {len(palette)} (requested {colors})\n"
+            f"[cyan]Saved:[/cyan]   {saved}"
+        ),
+    )
+    line = "".join(f"\x1b[48;2;{r};{g};{b}m   \x1b[0m" for r, g, b in palette)
+    click.echo(line)
+
+    if sheet_path is not None:
+        sheet = _render_swatch_sheet(palette)
+        sheet_path.parent.mkdir(parents=True, exist_ok=True)
+        sheet.save(sheet_path)
+        console.print(f"[green]Swatch sheet:[/green] {sheet_path}")
+
+
+def _render_swatch_sheet(colors, swatch: int = 64, cols: int = 8):
+    """Render a palette as a grid of color swatches (PIL image)."""
+    from PIL import Image, ImageDraw
+
+    n = len(colors)
+    cols = min(cols, n) or 1
+    rows = (n + cols - 1) // cols
+    img = Image.new("RGB", (cols * swatch, rows * swatch), (24, 24, 24))
+    draw = ImageDraw.Draw(img)
+    for i, color in enumerate(colors):
+        x = (i % cols) * swatch
+        y = (i // cols) * swatch
+        draw.rectangle([x, y, x + swatch - 1, y + swatch - 1], fill=tuple(color))
+    return img
 
 
 if __name__ == "__main__":
