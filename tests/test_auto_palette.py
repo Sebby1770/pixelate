@@ -8,7 +8,6 @@ from PIL import Image
 from pixelate.core import extract_palette, pixelate_image
 from pixelate.palettes import get_palette
 
-
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 SOURCE = ASSETS / "source.png"
 

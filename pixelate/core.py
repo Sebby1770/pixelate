@@ -476,6 +476,12 @@ def pixelate_image(
     edges: bool = False,
     invert: bool = False,
     contrast: float = 1.0,
+    color_space: str = "rgb",
+    posterize: Optional[int] = None,
+    grid: bool = False,
+    outline: bool = False,
+    chromatic: bool = False,
+    color_bleed: bool = False,
 ) -> Image.Image:
     """
     Convert an image into retro pixel art.
@@ -533,6 +539,8 @@ def pixelate_image(
     # --- Pre-process ----------------------------------------------------
     if invert:
         img = ImageOps.invert(img)
+    if posterize is not None:
+        img = ImageOps.posterize(img, max(1, min(8, int(posterize))))
     img = _adjust_contrast(img, contrast)
     img = _adjust_saturation(img, saturation)
     if edges:
@@ -551,9 +559,14 @@ def pixelate_image(
     palette_arr = np.array(palette_colors, dtype=np.float32)
     arr = np.array(img, dtype=np.uint8)
     dither_fn = get_dither(dither)
-    quantized = dither_fn(arr.astype(np.float32), palette_arr)
+    quantized = dither_fn(arr.astype(np.float32), palette_arr, color_space=color_space)
 
     out = Image.fromarray(quantized.astype(np.uint8), mode="RGB")
+
+    # --- Outline (at logical resolution, before upscale) ---------------
+    if outline:
+        from pixelate.effects import apply_outline
+        out = apply_outline(out)
 
     # --- Upscale --------------------------------------------------------
     if upscale > 1:
@@ -561,8 +574,17 @@ def pixelate_image(
         out = out.resize(new_size, Image.NEAREST)
 
     # --- Effects --------------------------------------------------------
+    if grid:
+        from pixelate.effects import apply_pixel_grid
+        out = apply_pixel_grid(out, cell=max(2, upscale))
+    if chromatic:
+        from pixelate.effects import apply_chromatic_aberration
+        out = apply_chromatic_aberration(out, shift=max(1, upscale // 2))
+    if color_bleed:
+        from pixelate.effects import apply_color_bleed
+        out = apply_color_bleed(out, width=max(3, upscale))
     if scanlines or crt:
-        from pixelate.effects import apply_scanlines, apply_crt
+        from pixelate.effects import apply_crt, apply_scanlines
         if scanlines:
             out = apply_scanlines(out)
         if crt:

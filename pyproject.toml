@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pixelate"
-version = "2.1.0"
-description = "A retro pixel art converter CLI with classic gaming palettes, auto palette extraction, dithering, CRT effects, animation, batch convert, compare grids, and spritesheets."
+version = "3.0.0"
+description = "A retro pixel art converter CLI with classic gaming palettes, auto palette extraction, perceptual CIELAB matching, dithering, retro effects (CRT, outline, chromatic, NTSC bleed), animation, batch convert, compare grids, and spritesheets."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -24,6 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Graphics",
     "Topic :: Artistic Software",
 ]
@@ -38,6 +39,8 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "ruff>=0.6.0",
+    "mypy>=1.8.0",
 ]
 
 [project.scripts]
@@ -54,3 +57,19 @@ include = ["pixelate*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+# PIL's stubs are incomplete (Image.LANCZOS etc.); check our own code without
+# drowning in third-party stub noise.
+disable_error_code = ["attr-defined", "assignment", "arg-type"]
+files = ["pixelate"]

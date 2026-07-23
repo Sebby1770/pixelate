@@ -178,7 +178,55 @@ CYBERPUNK: Palette = (
 
 # ---- Registry --------------------------------------------------------------
 
+# Sega Game Gear — bright, saturated 16-color handheld selection.
+GAMEGEAR: Palette = (
+    (0, 0, 0),         (34, 34, 34),     (85, 85, 85),     (255, 255, 255),
+    (170, 0, 0),       (255, 68, 68),    (255, 136, 0),    (255, 221, 68),
+    (0, 136, 0),       (68, 221, 68),    (0, 136, 170),    (68, 204, 255),
+    (34, 34, 170),     (136, 68, 221),   (221, 68, 187),   (255, 170, 204),
+)
+
+# Nintendo Virtual Boy — four intensities of its signature red-on-black.
+VIRTUALBOY: Palette = (
+    (0, 0, 0),
+    (89, 0, 0),
+    (173, 0, 0),
+    (255, 0, 0),
+)
+
+# Amstrad CPC — a bright, chalky selection from its 27-color hardware set.
+AMSTRAD_CPC: Palette = (
+    (0, 0, 0),         (0, 0, 128),      (0, 0, 255),      (128, 0, 0),
+    (128, 0, 128),     (128, 0, 255),    (255, 0, 0),      (255, 0, 128),
+    (255, 0, 255),     (0, 128, 0),      (0, 128, 128),    (0, 255, 0),
+    (128, 255, 0),     (255, 255, 0),    (128, 128, 128),  (255, 255, 255),
+)
+
+# UK Teletext / BBC Micro — the eight pure primaries of saturated RGB.
+TELETEXT: Palette = (
+    (0, 0, 0),         (255, 0, 0),      (0, 255, 0),      (255, 255, 0),
+    (0, 0, 255),       (255, 0, 255),    (0, 255, 255),    (255, 255, 255),
+)
+
+# DawnBringer 32 — the extended, painterly companion to DB16.
+DB32: Palette = (
+    (0, 0, 0),         (34, 32, 52),     (69, 40, 60),     (102, 57, 49),
+    (143, 86, 59),     (223, 113, 38),   (217, 160, 102),  (238, 195, 154),
+    (251, 242, 54),    (153, 229, 80),   (106, 190, 48),   (55, 148, 110),
+    (75, 105, 47),     (82, 75, 36),     (50, 60, 57),     (63, 63, 116),
+    (48, 96, 130),     (91, 110, 225),   (99, 155, 255),   (95, 205, 228),
+    (203, 219, 252),   (255, 255, 255),  (155, 173, 183),  (132, 126, 135),
+    (105, 106, 106),   (89, 86, 82),     (118, 66, 138),   (172, 50, 50),
+    (217, 87, 99),     (215, 123, 186),  (143, 151, 74),   (138, 111, 48),
+)
+
+
 PALETTES: Dict[str, Palette] = {
+    "gamegear": GAMEGEAR,
+    "virtualboy": VIRTUALBOY,
+    "amstrad": AMSTRAD_CPC,
+    "teletext": TELETEXT,
+    "db32": DB32,
     "gameboy": GAMEBOY_DMG,
     "gameboy-pocket": GAMEBOY_POCKET,
     "gameboy-color": GAMEBOY_COLOR,

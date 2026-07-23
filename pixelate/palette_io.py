@@ -9,10 +9,11 @@ Supported formats:
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Iterable, Sequence, Tuple, Union
+from typing import Tuple, Union
 
-from pixelate.palettes import PALETTES, Palette, RGB
+from pixelate.palettes import PALETTES, RGB, Palette
 
 PathLike = Union[str, Path]
 
@@ -157,6 +158,26 @@ def register_palette_file(name: str, path: PathLike) -> Palette:
     """Load a palette file and register it under *name*."""
     colors = load_palette_file(path)
     return register_palette(name, colors)
+
+
+def save_hex(path: PathLike, colors: Sequence[RGB]) -> Path:
+    """Write a palette as a ``.hex`` file (one ``RRGGBB`` per line)."""
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["{:02X}{:02X}{:02X}".format(*c) for c in colors]
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
+
+
+def save_gpl(path: PathLike, colors: Sequence[RGB], name: str = "PIXELATE") -> Path:
+    """Write a palette as a GIMP ``.gpl`` file."""
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["GIMP Palette", f"Name: {name}", f"Columns: {min(len(colors), 16)}", "#"]
+    for r, g, b in colors:
+        lines.append(f"{r:3d} {g:3d} {b:3d}\t{r:02X}{g:02X}{b:02X}")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
 
 
 def colors_from_iterable(colors: Iterable[RGB]) -> Palette:

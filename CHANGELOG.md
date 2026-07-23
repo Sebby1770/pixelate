@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented in this file.
 
+## [3.0.0] — 2026-07-22
+
+### Added
+
+- **Perceptual CIELAB matching** (`--color-space lab`): a vectorized sRGB→CIELAB
+  conversion (`pixelate.colorspace`, validated exact against reference colors)
+  and a cached nearest-palette LUT (`pixelate.lut`). Matching in LAB tracks how
+  the eye reads color instead of raw RGB distance.
+- **Five retro effects**: `--posterize`, `--outline` (auto background detection
+  + roll-based dilation), `--grid`, `--chromatic` (edge-clamped R/B split), and
+  `--color-bleed` (NTSC YIQ chroma bleed). All numpy-vectorized, opt-in kwargs on
+  `pixelate_image` / `pixelate_animation`.
+- **`pixelate extract` command**: save an extracted palette as `.gpl`/`.hex`
+  (new `save_gpl` / `save_hex` writers) plus an optional swatch-sheet PNG.
+- **Five new palettes**: Game Gear, Virtual Boy, Amstrad CPC, Teletext, and
+  DawnBringer 32.
+- Developer tooling: ruff + mypy configuration, both clean; CI now runs the test
+  matrix on Python 3.9–3.13 plus a dedicated lint/type job.
+
+### Changed
+
+- Version **3.0.0**.
+- Dithering routes palette matching through the new engine; the default RGB
+  no-dither path stays exact (byte-identical output). The LUT is used only where
+  it wins — LAB error diffusion and large palettes.
+- All new features default off, so existing output and the public API are
+  unchanged; builds on the 2.1 auto-palette, compare, scale, and report work.
+
 ## [2.1.0] — 2026-07-19
 
 ### Added
