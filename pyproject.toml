@@ -67,7 +67,11 @@ select = ["E", "F", "I", "B"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.10"
+# Deliberately NOT pinning python_version: it sets the syntax level used to
+# parse *every* file including third-party stubs, and modern numpy stubs use
+# PEP 695 `type` statements that fail to parse below 3.12. Type-check on the
+# running interpreter instead. Python 3.9 compatibility is enforced by ruff's
+# target-version and by the 3.9 job in the CI test matrix.
 ignore_missing_imports = true
 # PIL's stubs are incomplete (Image.LANCZOS etc.); check our own code without
 # drowning in third-party stub noise.
