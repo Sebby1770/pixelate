@@ -108,3 +108,49 @@ def test_save_animation_roundtrip(tmp_path: Path):
     assert len(loaded) == 2
     assert durs[0] == 100
     assert durs[1] == 200
+
+
+def test_auto_palette_is_extracted_once_for_all_frames(tmp_path: Path):
+    """
+    An auto palette must be derived once and reused, not re-extracted per
+    frame — otherwise the palette drifts and the animation visibly flickers.
+    """
+    gif = _make_animated_gif(tmp_path / "in.gif", n_frames=3)
+    frames, _ = pixelate_animation(
+        gif,
+        palette="auto",
+        colors=6,
+        pixel_size=16,
+        upscale=1,
+        dither="none",
+    )
+    assert len(frames) == 3
+    used = set()
+    for frame in frames:
+        used |= set(map(tuple, np.array(frame).reshape(-1, 3)))
+    # Every frame draws from the same <= 6 color palette.
+    assert len(used) <= 6
+
+
+def test_new_conversion_kwargs_reach_every_frame(tmp_path: Path):
+    """color_space and the effect flags must be forwarded per frame."""
+    gif = _make_animated_gif(tmp_path / "in.gif", n_frames=2)
+    base, _ = pixelate_animation(
+        gif, palette="nes", pixel_size=16, upscale=2, dither="none"
+    )
+    for kwargs in (
+        {"color_space": "lab"},
+        {"posterize": 2},
+        {"outline": True},
+        {"grid": True},
+        {"chromatic": True},
+        {"color_bleed": True},
+    ):
+        out, _ = pixelate_animation(
+            gif, palette="nes", pixel_size=16, upscale=2, dither="none", **kwargs
+        )
+        assert len(out) == len(base)
+        changed = any(
+            not np.array_equal(np.array(a), np.array(b)) for a, b in zip(base, out)
+        )
+        assert changed, f"{kwargs} had no effect on any frame"
