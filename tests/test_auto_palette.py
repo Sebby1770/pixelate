@@ -90,6 +90,22 @@ def test_auto_still_uses_only_extracted_colors():
     assert unique.issubset(set(pal))
 
 
+def test_pixelate_auto_stashes_working_palette():
+    src = _make_test_image()
+    out = pixelate_image(
+        src,
+        palette="auto",
+        colors=4,
+        pixel_size=32,
+        upscale=1,
+        dither="none",
+    )
+    assert "pixelate_palette" in out.info
+    pal = out.info["pixelate_palette"]
+    unique = {tuple(int(x) for x in c) for c in np.array(out.convert("RGB")).reshape(-1, 3)}
+    assert unique.issubset(set(tuple(c) for c in pal))
+
+
 def test_builtin_palette_still_works():
     src = _make_test_image()
     out = pixelate_image(src, palette="gameboy", pixel_size=16, upscale=1, dither="none")

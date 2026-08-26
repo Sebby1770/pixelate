@@ -7,7 +7,7 @@
 ██╔═══╝ ██║ ██╔██╗ ██╔══╝  ██║     ██╔══██║   ██║   ██╔══╝
 ██║     ██║██╔╝ ██╗███████╗███████╗██║  ██║   ██║   ███████╗
 ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
-        retro pixel art from any image  ·  v2.1.0
+        retro pixel art from any image  ·  v2.2.0
 ```
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
@@ -15,7 +15,9 @@
 [![CI](https://github.com/Sebby1770/pixelate/actions/workflows/ci.yml/badge.svg)](https://github.com/Sebby1770/pixelate/actions/workflows/ci.yml)
 [![Built with Pillow](https://img.shields.io/badge/built%20with-Pillow-8A2BE2.svg)](https://python-pillow.org/)
 
-> Turn any image (or animated GIF) into authentic retro pixel art using classic gaming palettes, auto-extracted palettes, seven dithering algorithms, CRT glow + scanlines, batch conversion, palette compare grids, and spritesheet export. Or print it as ANSI art straight to your terminal.
+**Web lab:** [https://sebby1770.github.io/pixelate/](https://sebby1770.github.io/pixelate/)
+
+> Turn any image (or animated GIF) into authentic retro pixel art using classic gaming palettes, **CIELAB (CIE76) matching**, serpentine error diffusion, auto-extracted palettes, eight dithering algorithms (including JJN), CRT glow + scanlines, indexed PNG/GIF, batch conversion, palette compare grids, and spritesheet export. Or open the static **web playground**. Or print it as ANSI art straight to your terminal.
 
 ---
 
@@ -32,24 +34,31 @@
 
 Modern image filters smooth everything out. PIXELATE goes the other way — it crushes color depth down to the exact palettes used by the consoles and home computers of the 80s and 90s, dithers cleverly to preserve detail, and gives you a finished pixel-art image that looks like it shipped on a cartridge.
 
-## Features (v2.1)
+## Features (v2.2)
 
+- **CIELAB matching** — nearest palette color uses CIE76 Lab by default (`--colorspace lab|rgb`).
+- **Serpentine dither** — error diffusion scans odd rows right-to-left (`--no-serpentine` to disable).
+- **Jarvis-Judice-Ninke** — `--dither jjn` plus floyd / atkinson / bayer / stucki / burkes / sierra / none.
+- **Alpha + EXIF** — orientation is respected; transparent sources stay RGBA; spritesheets keep tile alpha.
+- **Indexed PNG / locked GIF** — JPEG destinations become PNG; stills can write mode-`P` with the exact palette; GIFs share one palette (`disposal=2`).
+- **Auto palette + honest `--report`** — working colors live on `result.info["pixelate_palette"]` (extracted after preprocess+resize).
+- **`pixelate extract`** — dump N colors to a GIMP `.gpl` (optional `.hex`).
+- **Web playground** — static `web/` lab (local FileReader, live canvas, PNG download). No build step.
 - **Auto palette** — `--palette auto --colors N` extracts colors from the image (k-means or median-cut, numpy only).
 - **Palette compare grid** — side-by-side collage of multiple palettes with labels.
 - **Extra nearest scale** — `--scale N` for chunky display pixels after conversion.
 - **Edge pre-pass** — `--edges` sharpen/emboss-lite to keep outlines.
 - **Color usage report** — `--report` shows pixel counts per palette color.
 - **Invert / contrast** — quick pre-quantize tweaks.
-- **25+ retro palettes** — Game Boy DMG/Pocket/Color, NES, C64, VIC-20, Atari 2600, ZX Spectrum, CGA, PICO-8, Apple II, EGA, MSX, Sega Master System, DawnBringer 16, vaporwave, Tokyo Night, cyberpunk, sunset, mono phosphor, grayscale.
-- **7 dithering algorithms** — Floyd-Steinberg, Atkinson, Ordered Bayer, Stucki, Burkes, Sierra (two-row), and flat quantization.
-- **Custom palette files** — load GIMP `.gpl` or `.hex` palettes via `--palette-file` or the Python API.
+- **28+ retro palettes** — Game Boy DMG/Pocket/Color, NES, C64, VIC-20, Atari 2600, ZX Spectrum, CGA, PICO-8, Apple II, EGA, MSX, Sega Master System, DawnBringer 16, Sweetie 16, Endesga 32, Macintosh 16-color, vaporwave, Tokyo Night, cyberpunk, sunset, mono phosphor, grayscale.
+- **Custom palette files** — load or write GIMP `.gpl` / `.hex` via `--palette-file`, `extract`, and `palettes --save-gpl`.
 - **Animated GIF / WebP** — multi-frame inputs are auto-detected; frame durations are preserved.
-- **Batch convert** — process whole directories with a rich progress bar.
+- **Batch convert** — process whole directories; stills always land as `.png` (never keep `.jpg`).
 - **Spritesheet export** — tile converted images into a grid.
 - **CRT effects** — soft bloom + corner vignette + horizontal scanlines.
 - **ASCII / ANSI mode** — render any image as colored terminal art.
 - **Beautifully retro CLI** — green-on-black banner, palette previews, swatches, progress bars.
-- **Clean Python API** — `pixelate_image()`, `extract_palette()`, `compare_palettes()`, and more.
+- **Clean Python API** — `pixelate_image()`, `dither_image()`, `srgb_to_lab()`, `extract_palette()`, `compare_palettes()`, and more.
 
 ## Install
 
@@ -79,6 +88,8 @@ python -m pixelate --help
 
 ```bash
 pixelate convert photo.jpg --palette gameboy --pixel-size 96 --dither floyd
+# Lab matching + serpentine are the defaults
+pixelate convert photo.jpg --colorspace rgb --no-serpentine --dither jjn
 ```
 
 Auto palette from the image:
@@ -125,6 +136,14 @@ pixelate convert photo.jpg --palette-file neon.hex --dither burkes
 
 `.hex` files are one `RRGGBB` or `#RRGGBB` color per line. `.gpl` is the GIMP palette format.
 
+Extract a palette from an image, or dump a built-in:
+
+```bash
+pixelate extract photo.jpg -o photo.gpl --colors 12
+pixelate extract photo.jpg -o photo.gpl --hex
+pixelate palettes --save-gpl pico8 -o pico8.gpl
+```
+
 Preview / session-register a file:
 
 ```bash
@@ -169,8 +188,13 @@ pixelate ascii photo.jpg --no-color -o art.txt
 pixelate palettes          # list all built-in palettes
 pixelate preview pico8     # print a color swatch
 pixelate preview cyberpunk
-pixelate preview tokyo-night
+pixelate preview sweetie16
+pixelate preview macintosh
 ```
+
+### Web playground
+
+Open `web/index.html` locally (or the GitHub Pages deploy). Load an image, pick a palette / dither, tweak pixel size + upscale, toggle CRT/scanlines, download a PNG. Processing is entirely in the browser.
 
 ## CLI reference
 
@@ -182,7 +206,7 @@ pixelate convert IMAGE [OPTIONS]
       --extract-method  kmeans | median-cut
   -s, --pixel-size      Resolution of longest side (8–1024)
   -d, --dither          none | floyd | atkinson | bayer |
-                        stucki | burkes | sierra
+                        stucki | burkes | sierra | jjn
   -u, --upscale         1–16 (output pixels per logical pixel)
       --scale           1–32 extra nearest-neighbor upscale
       --saturation      0.0–3.0 (pre-quantize boost)
@@ -191,8 +215,10 @@ pixelate convert IMAGE [OPTIONS]
       --edges           Edge-aware sharpen pre-pass
       --crt             Apply CRT bloom + vignette
       --scanlines       Overlay horizontal scanlines
+      --colorspace      lab (default, CIE76) | rgb
+      --serpentine / --no-serpentine
       --report          Print color usage table
-  -o, --output          Output path (default: <name>_pixel.png/.gif)
+  -o, --output          Output path (JPEG suffixes become .png)
 
 pixelate compare IMAGE [OPTIONS]
       --palettes        comma-separated names (default gameboy,nes,pico8,c64)
@@ -217,7 +243,9 @@ pixelate ascii IMAGE [OPTIONS]
       --invert          Invert ramp (light terminals)
   -o, --output          Save to .txt
 
+pixelate extract IMAGE -o FILE.gpl [--colors N] [--hex]
 pixelate palettes [--load FILE] [--register-as NAME]
+                  [--save-gpl NAME -o FILE.gpl]
 pixelate preview PALETTE
 ```
 
@@ -232,14 +260,17 @@ pixelate preview PALETTE
 | `c64` | 16 | Commodore 64 |
 | `vic20` / `vic-20` | 16 | Commodore VIC-20 |
 | `atari2600` / `atari-2600` | 32 | Atari 2600 TIA subset |
-| `zx` | 16 | ZX Spectrum |
+| `zx` | 15 | ZX Spectrum (unique; one black) |
 | `cga` | 4 | CGA Mode 4 high intensity |
 | `pico8` | 16 | PICO-8 |
 | `apple2` | 16 | Apple II low-res |
 | `ega` | 16 | IBM EGA |
-| `msx` | 16 | MSX Screen 2 |
+| `msx` | 15 | MSX Screen 2 (unique; one black) |
 | `sms` / `master-system` | 16 | Sega Master System |
 | `db16` | 16 | DawnBringer 16 |
+| `sweetie16` / `sweetie-16` | 16 | Lospec Sweetie 16 |
+| `endesga32` / `endesga-32` | 32 | Endesga 32 |
+| `macintosh` | 16 | Apple Macintosh System 16-color |
 | `vaporwave` | 12 | Aesthetic neon |
 | `tokyo-night` / `tokyo` | 16 | Tokyo Night theme |
 | `cyberpunk` | 16 | Neon cyberpunk night |
@@ -258,13 +289,19 @@ from pixelate import (
     color_usage_report,
     register_palette,
     load_palette_file,
+    srgb_to_lab,
+    dither_image,
+    save_gpl,
+    save_hex,
 )
 
 img = pixelate_image(
     "photo.jpg",
     palette="pico8",
     pixel_size=128,
-    dither="stucki",
+    dither="jjn",
+    colorspace="lab",
+    serpentine=True,
     upscale=4,
     scale=2,
     edges=True,
@@ -320,8 +357,8 @@ sheet.save("sheet.png")
 1. **Pre-process (optional)** — invert, contrast, saturation, edge-aware sharpen.
 2. **Resize** — the source image is downsampled with Lanczos to a low resolution (you control this — `pixel_size`). This is the actual "pixelation."
 3. **Palette** — built-in name, custom file, RGB sequence, or **auto** extract via k-means / median-cut.
-4. **Quantize** — every pixel is matched against the chosen palette using Euclidean distance in RGB.
-5. **Dither** — quantization error is either spread to neighboring pixels (Floyd-Steinberg, Atkinson, Stucki, Burkes, Sierra) or hidden in a deterministic pattern (Bayer).
+4. **Quantize** — every pixel is matched against the chosen palette using CIE76 Lab (default) or Euclidean RGB.
+5. **Dither** — quantization error is spread with serpentine kernels (Floyd-Steinberg, Atkinson, Stucki, Burkes, Sierra, JJN) or hidden in a Bayer pattern.
 6. **Upscale** — the small image is enlarged with nearest-neighbor so the pixels stay crisp and chunky (`upscale`, then optional extra `--scale`).
 7. **Effects (optional)** — scanlines and a CRT-style bloom-plus-vignette pass.
 8. **Animation** — multi-frame sources run the pipeline per frame, then reassemble with original durations.
@@ -333,7 +370,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-GitHub Actions runs pytest on Python 3.10, 3.11, and 3.12 (see `.github/workflows/ci.yml`).
+GitHub Actions runs pytest on Python 3.9–3.13 (see `.github/workflows/ci.yml`). The playground is published from `web/` via `.github/workflows/pages.yml`.
 
 ## Project layout
 
@@ -342,17 +379,20 @@ pixelate/
 ├── pixelate/
 │   ├── __init__.py
 │   ├── __main__.py
-│   ├── cli.py          # Click CLI (convert, compare, batch, sheet, ascii, palettes)
-│   ├── core.py         # Conversion pipeline, auto palette, compare, report
-│   ├── animation.py    # Multi-frame GIF/WebP
-│   ├── palette_io.py   # .hex / .gpl loaders + register_palette
+│   ├── cli.py          # Click CLI (convert, compare, batch, sheet, extract, ascii, palettes)
+│   ├── core.py         # Conversion pipeline, auto palette, compare, report, indexed I/O
+│   ├── colorspace.py   # sRGB → Lab, nearest-palette indices
+│   ├── animation.py    # Multi-frame GIF/WebP (shared P palette)
+│   ├── palette_io.py   # .hex / .gpl load + save + register_palette
 │   ├── palettes.py     # Built-in retro palettes
-│   ├── dithering.py    # FS, Atkinson, Bayer, Stucki, Burkes, Sierra
+│   ├── dithering.py    # FS, Atkinson, Bayer, Stucki, Burkes, Sierra, JJN
 │   ├── effects.py      # CRT, scanlines, vignette
 │   ├── ascii_art.py    # ASCII / ANSI rendering
 │   └── ui.py           # Rich-styled banner + tables
+├── web/                # Static playground (GitHub Pages)
 ├── tests/
 ├── .github/workflows/ci.yml
+├── .github/workflows/pages.yml
 ├── pyproject.toml
 ├── requirements.txt
 ├── CHANGELOG.md
@@ -371,8 +411,8 @@ pixelate/
 - [x] Palette extraction from source images
 - [x] Multi-palette compare collage
 - [x] Color usage report
-- [ ] Web playground
-- [ ] Optional LAB / perceptual color distance
+- [x] Web playground
+- [x] Optional LAB / perceptual color distance (CIE76, default)
 
 ## License
 

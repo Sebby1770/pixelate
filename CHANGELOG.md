@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.2.0] — 2026-08-26
+
+### Added
+
+- **CIELAB matching** — palette nearest-color uses CIE76 Lab by default (`--colorspace lab|rgb`). `srgb_to_lab()` / `nearest_palette_indices()` / `dither_image()`.
+- **Serpentine error diffusion** — even rows L→R, odd rows R→L (`--serpentine` / `--no-serpentine`, default on).
+- **Jarvis-Judice-Ninke** — `--dither jjn` (12-element kernel, 48ths).
+- **Alpha + EXIF** — `ImageOps.exif_transpose` after open; RGBA sources keep a NEAREST-resized alpha channel; spritesheets preserve alpha if any tile has it.
+- **Palette-locked I/O** — JPEG outputs are forced to PNG unless `allow_jpeg=True`. PNG can be written as indexed mode `P` with the exact working palette. GIFs use a shared `P` palette and `disposal=2`.
+- **Auto-palette report** — working colors are stashed on `result.info["pixelate_palette"]` so `--report` matches the pipeline (extract after preprocess+resize).
+- **Palettes** — Sweetie 16 (`sweetie16`), Endesga 32 (`endesga32`), Macintosh 16-color System (`macintosh`). Duplicate blacks removed from ZX Spectrum and MSX.
+- **`pixelate extract`** — extract N colors to a GIMP `.gpl` (optional `.hex`).
+- **`pixelate palettes --save-gpl NAME -o file.gpl`** — dump a built-in palette.
+- **`save_gpl` / `save_hex`** in `palette_io.py`.
+- **Web playground** — static `web/` lab (FileReader, palettes, floyd/atkinson/bayer/jjn/none, CRT/scanlines, PNG download). GitHub Pages workflow publishes it.
+
+### Changed
+
+- Default matching space is Lab (CIE76). RGB Euclidean remains available.
+- Batch convert always writes `.png` for stills (never keeps a `.jpg` suffix). Failures raise after the loop so CI notices.
+- Sierra docstring now correctly describes Sierra-2 (not Filter Lite).
+
+### Tests
+
+- `test_colorspace.py`, `test_cli.py`, `test_effects.py`, plus extensions for serpentine, JJN, RGBA, indexed PNG, GIF palette lock, unique ZX/MSX, auto-palette info.
+
 ## [2.1.0] — 2026-07-19
 
 ### Added

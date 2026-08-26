@@ -10,6 +10,8 @@ from pixelate.palette_io import (
     load_palette_file,
     register_palette,
     register_palette_file,
+    save_gpl,
+    save_hex,
 )
 from pixelate.palettes import PALETTES, get_palette
 
@@ -107,3 +109,17 @@ def test_unsupported_extension(tmp_path: Path):
     p.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="Unsupported"):
         load_palette_file(p)
+
+
+def test_save_gpl_roundtrip(tmp_path: Path):
+    colors = ((10, 20, 30), (255, 0, 128))
+    path = save_gpl(colors, tmp_path / "out.gpl", name="Roundtrip")
+    name, loaded = load_gpl(path)
+    assert name == "Roundtrip"
+    assert loaded == colors
+
+
+def test_save_hex_roundtrip(tmp_path: Path):
+    colors = ((255, 0, 0), (0, 255, 0), (0, 0, 255))
+    path = save_hex(colors, tmp_path / "out.hex")
+    assert load_hex(path) == colors

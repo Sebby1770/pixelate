@@ -13,6 +13,7 @@ from pixelate import __version__
 from pixelate.animation import is_animated, pixelate_animation
 from pixelate.ascii_art import RAMPS, image_to_ascii, save_ascii
 from pixelate.core import (
+    PALETTE_INFO_KEY,
     collect_images,
     color_usage_report,
     compare_palettes,
@@ -23,8 +24,8 @@ from pixelate.core import (
     save_image,
 )
 from pixelate.dithering import DITHER_ALGORITHMS
-from pixelate.palette_io import load_palette_file, register_palette
-from pixelate.palettes import PALETTES, list_palettes
+from pixelate.palette_io import load_palette_file, register_palette, save_gpl, save_hex
+from pixelate.palettes import PALETTES, get_palette, list_palettes
 from pixelate.ui import console, info_panel, print_banner, print_palette_table
 
 
@@ -112,6 +113,19 @@ def _common_convert_options(fn):
         click.option("--crt", is_flag=True, help="Apply CRT glow + vignette."),
         click.option("--scanlines", is_flag=True, help="Overlay horizontal scanlines."),
         click.option(
+            "--colorspace",
+            type=click.Choice(["lab", "rgb"], case_sensitive=False),
+            default="lab",
+            show_default=True,
+            help="Palette matching space (CIE76 Lab or Euclidean RGB).",
+        ),
+        click.option(
+            "--serpentine/--no-serpentine",
+            default=True,
+            show_default=True,
+            help="Serpentine error diffusion (even rows L→R, odd rows R→L).",
+        ),
+        click.option(
             "--report",
             is_flag=True,
             help="Print color-usage report (palette color pixel counts).",
@@ -192,6 +206,8 @@ def _convert_kwargs(
     edges: bool = False,
     invert: bool = False,
     contrast: float = 1.0,
+    colorspace: str = "lab",
+    serpentine: bool = True,
 ) -> dict:
     return dict(
         palette=palette,
@@ -208,6 +224,8 @@ def _convert_kwargs(
         edges=edges,
         invert=invert,
         contrast=contrast,
+        colorspace=colorspace,
+        serpentine=serpentine,
     )
 
 
@@ -247,6 +265,8 @@ def convert_cmd(
     edges: bool,
     crt: bool,
     scanlines: bool,
+    colorspace: str,
+    serpentine: bool,
     report: bool,
 ) -> None:
     """Convert IMAGE to retro pixel art (auto-detects animated GIF/WebP)."""
@@ -274,6 +294,7 @@ def convert_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
+        colorspace, serpentine,
     )
 
     info_panel(
@@ -283,7 +304,9 @@ def convert_cmd(
             f"[cyan]Palette:[/cyan]   [yellow]{_palette_label(palette, palette_file, colors)}[/yellow]\n"
             f"[cyan]Resolution:[/cyan] {pixel_size}px × {upscale}× upscale"
             f"{f' × {scale}× scale' if scale > 1 else ''}\n"
-            f"[cyan]Dither:[/cyan]    {dither}\n"
+            f"[cyan]Dither:[/cyan]    {dither}"
+            f"{'' if serpentine else ' (no serpentine)'}\n"
+            f"[cyan]Match:[/cyan]     {colorspace}\n"
             f"[cyan]Contrast:[/cyan]  {contrast}\n"
             f"[cyan]Animated:[/cyan]  {'yes' if animated else 'no'}\n"
             f"[cyan]Effects:[/cyan]   {effects_str}"
@@ -308,7 +331,11 @@ def convert_cmd(
             saved = output_path
         else:
             result = pixelate_image(input_path, **kwargs)
-            saved = save_image(result, output_path)
+            saved = save_image(
+                result,
+                output_path,
+                palette=result.info.get(PALETTE_INFO_KEY),
+            )
             size_label = f"{result.size[0]}×{result.size[1]}"
         progress.update(task, completed=1, total=1)
 
@@ -318,16 +345,14 @@ def convert_cmd(
     )
 
     if report and not animated:
-        # Resolve palette used for report
-        if palette_file is not None:
-            pal = resolve_palette(palette, palette_file=palette_file)
-        elif palette.lower().strip() == "auto":
-            # Re-extract for report labels (result already quantized)
-            from PIL import Image as PILImage
-            src_img = PILImage.open(input_path).convert("RGB")
-            pal = extract_palette(src_img, n=colors, method=extract_method)
-        else:
-            pal = resolve_palette(palette)
+        pal = result.info.get(PALETTE_INFO_KEY)
+        if pal is None:
+            if palette_file is not None:
+                pal = resolve_palette(palette, palette_file=palette_file)
+            elif palette.lower().strip() == "auto":
+                pal = extract_palette(result, n=colors, method=extract_method)
+            else:
+                pal = resolve_palette(palette)
         _print_color_report(result, pal)
 
 
@@ -359,6 +384,8 @@ def batch_cmd(
     edges: bool,
     crt: bool,
     scanlines: bool,
+    colorspace: str,
+    serpentine: bool,
     report: bool,  # accepted but not printed per-file in batch
 ) -> None:
     """Batch-convert all images in INPUT_DIR into OUTPUT_DIR."""
@@ -373,6 +400,7 @@ def batch_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
+        colorspace, serpentine,
     )
 
     info_panel(
@@ -407,12 +435,14 @@ def batch_cmd(
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     pixelate_animation(src, output=dest, **kwargs)
                 else:
-                    dest = output_dir / Path(rel).with_name(out_name + src.suffix.lower())
-                    if dest.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
-                        dest = dest.with_suffix(".png")
+                    dest = output_dir / Path(rel).with_name(out_name + ".png")
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     result = pixelate_image(src, **kwargs)
-                    save_image(result, dest)
+                    save_image(
+                        result,
+                        dest,
+                        palette=result.info.get(PALETTE_INFO_KEY),
+                    )
                 ok += 1
             except Exception as exc:  # noqa: BLE001 — report and continue batch
                 errors.append(f"{src.name}: {exc}")
@@ -423,6 +453,8 @@ def batch_cmd(
         console.print(f"[bold red]✗[/bold red] {err}")
     if report:
         console.print("[dim]Note: --report is shown on single convert, not batch.[/dim]")
+    if errors:
+        raise click.ClickException(f"{len(errors)} file(s) failed in batch convert")
 
 
 @cli.command("sheet")
@@ -475,6 +507,8 @@ def sheet_cmd(
     edges: bool,
     crt: bool,
     scanlines: bool,
+    colorspace: str,
+    serpentine: bool,
     report: bool,
 ) -> None:
     """Stitch images (or a directory) into a spritesheet.
@@ -493,6 +527,7 @@ def sheet_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
+        colorspace, serpentine,
     )
 
     info_panel(
@@ -516,13 +551,13 @@ def sheet_cmd(
         transient=True,
     ) as progress:
         task = progress.add_task("[green]Building sheet...", total=len(files))
-        from PIL import Image
+        from PIL import Image, ImageOps
 
         for src in files:
             if convert:
                 tile = pixelate_image(src, **kwargs)
             else:
-                tile = Image.open(src).convert("RGB")
+                tile = ImageOps.exif_transpose(Image.open(src))
             tiles.append(tile)
             progress.advance(task)
 
@@ -574,6 +609,19 @@ def sheet_cmd(
     help="Grid columns (default: auto, max 4).",
 )
 @click.option("--no-label", is_flag=True, help="Hide palette name labels.")
+@click.option(
+    "--colorspace",
+    type=click.Choice(["lab", "rgb"], case_sensitive=False),
+    default="lab",
+    show_default=True,
+    help="Palette matching space (CIE76 Lab or Euclidean RGB).",
+)
+@click.option(
+    "--serpentine/--no-serpentine",
+    default=True,
+    show_default=True,
+    help="Serpentine error diffusion.",
+)
 def compare_cmd(
     input_path: Path,
     palette_list: str,
@@ -583,6 +631,8 @@ def compare_cmd(
     upscale: int,
     cols: int | None,
     no_label: bool,
+    colorspace: str,
+    serpentine: bool,
 ) -> None:
     """Compare multiple palettes on one image (labeled collage)."""
     print_banner()
@@ -625,6 +675,8 @@ def compare_cmd(
             upscale=upscale,
             cols=cols,
             label=not no_label,
+            colorspace=colorspace,
+            serpentine=serpentine,
         )
         saved = save_image(collage, output_path)
 
@@ -661,6 +713,61 @@ def ascii_cmd(input_path: Path, width: int, ramp: str, color: bool,
         console.print(f"\n[bold green]✓[/bold green] Saved: [cyan]{saved}[/cyan]")
 
 
+@cli.command("extract")
+@click.argument("input_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option(
+    "-o", "--output", "output_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    required=True,
+    help="Output palette path (.gpl or .hex).",
+)
+@click.option(
+    "--colors",
+    type=click.IntRange(1, 256),
+    default=16,
+    show_default=True,
+    help="Number of colors to extract.",
+)
+@click.option(
+    "--extract-method",
+    type=click.Choice(["kmeans", "median-cut"], case_sensitive=False),
+    default="kmeans",
+    show_default=True,
+)
+@click.option(
+    "--hex",
+    "write_hex",
+    is_flag=True,
+    help="Also write a .hex file next to the .gpl (same stem).",
+)
+def extract_cmd(
+    input_path: Path,
+    output_path: Path,
+    colors: int,
+    extract_method: str,
+    write_hex: bool,
+) -> None:
+    """Extract N colors from IMAGE and write a GIMP .gpl (optional .hex)."""
+    print_banner()
+    pal = extract_palette(input_path, n=colors, method=extract_method)
+    name = input_path.stem
+    suffix = output_path.suffix.lower()
+    if suffix == ".hex":
+        saved = save_hex(pal, output_path)
+        console.print(
+            f"[bold green]✓[/bold green] Wrote {len(pal)} colors → [cyan]{saved}[/cyan]"
+        )
+        return
+    saved = save_gpl(pal, output_path, name=name)
+    extra = ""
+    if write_hex:
+        hex_path = save_hex(pal, output_path.with_suffix(".hex"))
+        extra = f"  + [cyan]{hex_path}[/cyan]"
+    console.print(
+        f"[bold green]✓[/bold green] Wrote {len(pal)} colors → [cyan]{saved}[/cyan]{extra}"
+    )
+
+
 @cli.command("palettes")
 @click.option(
     "--load",
@@ -674,9 +781,40 @@ def ascii_cmd(input_path: Path, width: int, ramp: str, color: bool,
     default=None,
     help="With --load, also register the palette under this name for the session.",
 )
-def palettes_cmd(load_file: Path | None, register_as: str | None) -> None:
-    """List all built-in palettes (optionally load a custom file)."""
+@click.option(
+    "--save-gpl",
+    "save_gpl_name",
+    default=None,
+    help="Dump a built-in palette to a GIMP .gpl file (requires -o).",
+)
+@click.option(
+    "-o", "--output", "output_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Destination for --save-gpl.",
+)
+def palettes_cmd(
+    load_file: Path | None,
+    register_as: str | None,
+    save_gpl_name: str | None,
+    output_path: Path | None,
+) -> None:
+    """List all built-in palettes (optionally load or dump a .gpl)."""
     print_banner()
+
+    if save_gpl_name:
+        try:
+            colors = get_palette(save_gpl_name)
+        except KeyError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if output_path is None:
+            output_path = Path(f"{save_gpl_name.lower().strip()}.gpl")
+        saved = save_gpl(colors, output_path, name=save_gpl_name)
+        console.print(
+            f"[bold green]✓[/bold green] Saved [yellow]{save_gpl_name}[/yellow] "
+            f"({len(colors)} colors) → [cyan]{saved}[/cyan]\n"
+        )
+        return
 
     if load_file is not None:
         colors = load_palette_file(load_file)

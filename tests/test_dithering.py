@@ -7,8 +7,10 @@ from pixelate.dithering import (
     DITHER_ALGORITHMS,
     atkinson,
     burkes,
+    dither_image,
     floyd_steinberg,
     get_dither,
+    jarvis_judice_ninke,
     ordered_bayer,
     quantize_no_dither,
     sierra,
@@ -86,9 +88,36 @@ def test_get_dither_unknown_raises():
 
 
 def test_all_algorithms_registered():
-    for name in ("none", "floyd", "atkinson", "bayer", "stucki", "burkes", "sierra"):
+    for name in (
+        "none", "floyd", "atkinson", "bayer", "stucki", "burkes", "sierra", "jjn",
+    ):
         assert name in DITHER_ALGORITHMS
         assert callable(get_dither(name))
+
+
+def test_jjn_uses_only_palette_colors(gradient, palette):
+    out = jarvis_judice_ninke(gradient.copy(), palette)
+    unique = np.unique(out.reshape(-1, 3), axis=0)
+    assert len(unique) <= 2
+    _assert_only_palette(out, palette)
+
+
+def test_floyd_serpentine_uses_only_palette_colors(gradient, palette):
+    out = floyd_steinberg(gradient.copy(), palette, serpentine=True, space="rgb")
+    _assert_only_palette(out, palette)
+
+
+def test_floyd_serpentine_differs_from_ltr_on_gradient(gradient, palette):
+    a = floyd_steinberg(gradient.copy(), palette, serpentine=True, space="rgb")
+    b = floyd_steinberg(gradient.copy(), palette, serpentine=False, space="rgb")
+    assert a.shape == b.shape
+    assert not np.array_equal(a, b)
+
+
+def test_dither_image_jjn_subset(gradient, palette):
+    out = dither_image(gradient.copy(), palette, "jjn", space="lab", serpentine=True)
+    _assert_only_palette(out, palette)
+    assert out.dtype == np.uint8
 
 
 @pytest.mark.parametrize("name", ["stucki", "burkes", "sierra"])

@@ -96,3 +96,22 @@ def test_tokyo_night_and_cyberpunk():
     assert len(get_palette("tokyo-night")) == 16
     assert get_palette("tokyo") == get_palette("tokyo-night")
     assert len(get_palette("cyberpunk")) == 16
+
+
+def test_zx_and_msx_colors_are_unique():
+    zx = get_palette("zx")
+    msx = get_palette("msx")
+    assert len(zx) == len(set(zx))
+    assert len(msx) == len(set(msx))
+    assert (0, 0, 0) in zx
+    assert (0, 0, 0) in msx
+
+
+def test_v22_palettes_present():
+    assert len(get_palette("sweetie16")) == 16
+    assert get_palette("sweetie-16") == get_palette("sweetie16")
+    assert len(get_palette("endesga32")) == 32
+    assert get_palette("endesga-32") == get_palette("endesga32")
+    assert len(get_palette("macintosh")) == 16
+    assert (255, 255, 255) in get_palette("macintosh")
+    assert (0, 0, 0) in get_palette("macintosh")

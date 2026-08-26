@@ -2,7 +2,7 @@
 Core pixel-art conversion pipeline.
 
 The pipeline:
-  1. Load image and convert to RGB.
+  1. Load image (EXIF-aware), keep alpha aside, convert RGB.
   2. Optional invert / contrast / edge pre-pass.
   3. Downscale to target resolution (this is the "pixelation").
   4. Quantize to a retro (or auto-extracted) palette, optionally with dithering.
@@ -18,11 +18,93 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
-from pixelate.dithering import get_dither
+from pixelate.colorspace import nearest_palette_indices
+from pixelate.dithering import dither_image
 from pixelate.palettes import RGB, Palette, get_palette
 
 PathLike = Union[str, Path]
 ColorUsage = Tuple[RGB, int, float]  # color, pixel count, percentage
+
+# Stashed on the returned image so CLI --report uses the same auto palette
+PALETTE_INFO_KEY = "pixelate_palette"
+
+
+def image_has_alpha(img: Image.Image) -> bool:
+    """True if *img* carries an alpha channel or indexed transparency."""
+    if img.mode in ("RGBA", "LA", "PA"):
+        return True
+    if img.mode == "P":
+        if "transparency" in img.info:
+            return True
+        pal = getattr(img, "palette", None)
+        if pal is not None and getattr(pal, "mode", None) in ("RGBA", "LA"):
+            return True
+    return False
+
+
+def _unique_rgb_colors(img: Image.Image) -> set:
+    arr = np.asarray(img.convert("RGB"), dtype=np.uint8)
+    if arr.size == 0:
+        return set()
+    uniq = np.unique(arr.reshape(-1, 3), axis=0)
+    return {tuple(int(x) for x in c) for c in uniq}
+
+
+def _palette_bytes(palette: Sequence[RGB], n: int = 256) -> bytes:
+    colors = [(int(c[0]), int(c[1]), int(c[2])) for c in palette]
+    if len(colors) > n:
+        colors = colors[:n]
+    flat: list[int] = []
+    for r, g, b in colors:
+        flat.extend([r, g, b])
+    if len(colors) < n:
+        flat.extend([0, 0, 0] * (n - len(colors)))
+    return bytes(flat)
+
+
+def image_to_indexed(img: Image.Image, palette: Sequence[RGB]) -> Image.Image:
+    """
+    Convert *img* to mode ``P`` using *palette* exactly (no extra colors).
+
+    Pixels are mapped with RGB nearest-neighbor so already-quantized images
+    keep exact palette entries. Dither is never applied here.
+    """
+    if not palette:
+        raise ValueError("Palette must contain at least one color")
+    rgb = img.convert("RGB")
+    colors = [(int(c[0]), int(c[1]), int(c[2])) for c in palette][:256]
+    arr = np.asarray(rgb, dtype=np.uint8)
+    pal_arr = np.array(colors, dtype=np.float32)
+    idx = nearest_palette_indices(arr.reshape(-1, 3), pal_arr, space="rgb")
+    indexed = Image.fromarray(
+        idx.reshape(arr.shape[0], arr.shape[1]).astype(np.uint8),
+        mode="P",
+    )
+    indexed.putpalette(_palette_bytes(colors))
+    return indexed
+
+
+def collect_working_colors(
+    frames: Sequence[Image.Image],
+    limit: int = 256,
+) -> Tuple[RGB, ...]:
+    """Unique RGB colors present in *frames*, capped at *limit* (GIF-safe)."""
+    seen: list[RGB] = []
+    seen_set = set()
+    for frame in frames:
+        arr = np.asarray(frame.convert("RGB"), dtype=np.uint8)
+        if arr.size == 0:
+            continue
+        for c in np.unique(arr.reshape(-1, 3), axis=0):
+            t = (int(c[0]), int(c[1]), int(c[2]))
+            if t not in seen_set:
+                seen_set.add(t)
+                seen.append(t)
+                if len(seen) >= limit:
+                    return tuple(seen)
+    if not seen:
+        return ((0, 0, 0),)
+    return tuple(seen)
 
 
 def _resize_keep_aspect(img: Image.Image, max_dim: int) -> Image.Image:
@@ -380,7 +462,8 @@ def compare_palettes(
     bg :
         Background fill color.
     **kwargs :
-        Extra kwargs forwarded to :func:`pixelate_image`.
+        Extra kwargs forwarded to :func:`pixelate_image` (``colorspace``,
+        ``serpentine``, CRT flags, …).
 
     Returns
     -------
@@ -476,6 +559,8 @@ def pixelate_image(
     edges: bool = False,
     invert: bool = False,
     contrast: float = 1.0,
+    colorspace: str = "lab",
+    serpentine: bool = True,
 ) -> Image.Image:
     """
     Convert an image into retro pixel art.
@@ -492,7 +577,7 @@ def pixelate_image(
         Target resolution of the longest side, in "pixels". Lower = chunkier.
     dither : str
         Dithering algorithm: ``none``, ``floyd``, ``atkinson``, ``bayer``,
-        ``stucki``, ``burkes``, ``sierra``.
+        ``stucki``, ``burkes``, ``sierra``, ``jjn``.
     upscale : int
         How many output pixels per logical pixel. ``4`` is a good default.
     saturation : float
@@ -517,18 +602,38 @@ def pixelate_image(
         Invert colors before palette quantization.
     contrast : float
         Contrast multiplier (1.0 = unchanged).
+    colorspace : str
+        Palette matching space: ``"lab"`` (CIE76, default) or ``"rgb"``.
+    serpentine : bool
+        Serpentine error diffusion for floyd/stucki/burkes/sierra/jjn
+        (and Atkinson). Default True.
 
     Returns
     -------
     PIL.Image
-        The pixel-art result, ready to save or display.
+        The pixel-art result, ready to save or display. The working palette
+        is stored on ``result.info["pixelate_palette"]``. Mode is RGBA when
+        the source had transparency.
     """
+    space = str(colorspace).lower().strip()
+    if space not in ("lab", "rgb"):
+        raise ValueError(f"Unknown colorspace '{colorspace}'. Use 'lab' or 'rgb'.")
+
     # --- Load -----------------------------------------------------------
     if isinstance(src, (str, Path)):
         img = Image.open(src)
     else:
         img = src
-    img = img.convert("RGB")
+    img = ImageOps.exif_transpose(img)
+
+    has_alpha = image_has_alpha(img)
+    alpha: Optional[Image.Image] = None
+    if has_alpha:
+        rgba = img.convert("RGBA")
+        alpha = rgba.getchannel("A")
+        img = rgba.convert("RGB")
+    else:
+        img = img.convert("RGB")
 
     # --- Pre-process ----------------------------------------------------
     if invert:
@@ -547,11 +652,20 @@ def pixelate_image(
     else:
         palette_colors = resolve_palette(palette, palette_file=None)
 
+    palette_colors = tuple(
+        (int(c[0]), int(c[1]), int(c[2])) for c in palette_colors
+    )
+
     # --- Quantize -------------------------------------------------------
     palette_arr = np.array(palette_colors, dtype=np.float32)
     arr = np.array(img, dtype=np.uint8)
-    dither_fn = get_dither(dither)
-    quantized = dither_fn(arr.astype(np.float32), palette_arr)
+    quantized = dither_image(
+        arr.astype(np.float32),
+        palette_arr,
+        dither,
+        space=space,
+        serpentine=serpentine,
+    )
 
     out = Image.fromarray(quantized.astype(np.uint8), mode="RGB")
 
@@ -572,14 +686,60 @@ def pixelate_image(
     if scale > 1:
         out = nearest_scale(out, scale)
 
+    if alpha is not None:
+        alpha_final = alpha.resize(out.size, Image.NEAREST)
+        out = out.convert("RGBA")
+        out.putalpha(alpha_final)
+
+    out.info[PALETTE_INFO_KEY] = palette_colors
     return out
 
 
-def save_image(img: Image.Image, path: Union[str, Path]) -> Path:
-    """Save an image, ensuring the parent directory exists."""
+def save_image(
+    img: Image.Image,
+    path: Union[str, Path],
+    palette: Optional[Sequence[RGB]] = None,
+    *,
+    allow_jpeg: bool = False,
+) -> Path:
+    """
+    Save an image, ensuring the parent directory exists.
+
+    JPEG destinations are rewritten to ``.png`` unless *allow_jpeg* is True
+    — pixel art must not be JPEG by default.
+
+    When *palette* is provided and the destination is PNG, and the image is
+    still palette-locked (every RGB is in *palette*), write an indexed
+    mode-``P`` PNG with that exact palette. RGBA / extra colors (CRT bloom)
+    stay truecolor so effects are not crushed.
+    """
     p = Path(path)
+    suffix = p.suffix.lower()
+    if suffix in {".jpg", ".jpeg"} and not allow_jpeg:
+        p = p.with_suffix(".png")
+        suffix = ".png"
     p.parent.mkdir(parents=True, exist_ok=True)
-    img.save(p)
+
+    to_save = img
+    if (
+        palette is not None
+        and suffix == ".png"
+        and img.mode not in ("RGBA", "LA", "PA")
+    ):
+        pal_tuples = tuple((int(c[0]), int(c[1]), int(c[2])) for c in palette)
+        unique = _unique_rgb_colors(img)
+        if unique.issubset(set(pal_tuples)):
+            to_save = image_to_indexed(img, pal_tuples)
+
+    # Drop custom info keys that some encoders reject
+    info_pal = None
+    if PALETTE_INFO_KEY in getattr(to_save, "info", {}):
+        info_pal = to_save.info.pop(PALETTE_INFO_KEY, None)
+    try:
+        to_save.save(p)
+    finally:
+        if info_pal is not None:
+            to_save.info[PALETTE_INFO_KEY] = info_pal
     return p
 
 
@@ -634,23 +794,32 @@ def make_spritesheet(
     if cols < 1:
         raise ValueError("cols must be >= 1")
 
-    rgb_images = [im.convert("RGB") for im in images]
-    tile_w = max(im.size[0] for im in rgb_images)
-    tile_h = max(im.size[1] for im in rgb_images)
-    n = len(rgb_images)
+    keep_alpha = any(image_has_alpha(im) or im.mode == "RGBA" for im in images)
+    tiles = [im.convert("RGBA") if keep_alpha else im.convert("RGB") for im in images]
+    tile_w = max(im.size[0] for im in tiles)
+    tile_h = max(im.size[1] for im in tiles)
+    n = len(tiles)
     rows = (n + cols - 1) // cols
 
     sheet_w = cols * tile_w + max(0, cols - 1) * padding
     sheet_h = rows * tile_h + max(0, rows - 1) * padding
-    sheet = Image.new("RGB", (sheet_w, sheet_h), bg)
+    if keep_alpha:
+        fill: Union[RGB, Tuple[int, int, int, int]]
+        if len(bg) == 4:
+            fill = (int(bg[0]), int(bg[1]), int(bg[2]), int(bg[3]))
+        else:
+            fill = (int(bg[0]), int(bg[1]), int(bg[2]), 255)
+        sheet = Image.new("RGBA", (sheet_w, sheet_h), fill)
+    else:
+        sheet = Image.new("RGB", (sheet_w, sheet_h), bg)
 
-    for i, im in enumerate(rgb_images):
+    for i, im in enumerate(tiles):
         row, col = divmod(i, cols)
         x = col * (tile_w + padding)
         y = row * (tile_h + padding)
-        # Center smaller images in the tile cell
         ox = x + (tile_w - im.size[0]) // 2
         oy = y + (tile_h - im.size[1]) // 2
+        # Paste without a mask so RGBA tiles copy their alpha channel.
         sheet.paste(im, (ox, oy))
 
     return sheet

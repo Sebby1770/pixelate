@@ -126,6 +126,59 @@ def test_save_image(tmp_path: Path):
     assert saved.is_file()
 
 
+def test_save_image_jpeg_becomes_png(tmp_path: Path):
+    img = _make_test_image((8, 8))
+    dest = tmp_path / "out.jpg"
+    saved = save_image(img, dest)
+    assert saved.suffix == ".png"
+    assert saved.is_file()
+    assert not dest.exists()
+
+
+def test_save_image_indexed_png(tmp_path: Path):
+    src = _make_test_image()
+    out = pixelate_image(src, palette="cga", pixel_size=16, upscale=1, dither="none")
+    dest = tmp_path / "indexed.png"
+    saved = save_image(out, dest, palette=out.info["pixelate_palette"])
+    with Image.open(saved) as im:
+        assert im.mode == "P"
+        unique = {tuple(c) for c in np.array(im.convert("RGB")).reshape(-1, 3)}
+        assert unique.issubset(set(get_palette("cga")))
+
+
+def test_rgba_keeps_transparent_pixel():
+    arr = np.zeros((16, 16, 4), dtype=np.uint8)
+    arr[..., :3] = (200, 40, 40)
+    arr[..., 3] = 255
+    arr[0, 0, 3] = 0
+    src = Image.fromarray(arr, mode="RGBA")
+    out = pixelate_image(src, palette="cga", pixel_size=16, upscale=1, dither="none")
+    assert out.mode == "RGBA"
+    assert int(np.array(out)[0, 0, 3]) == 0
+
+
+def test_auto_palette_stashed_on_info():
+    src = _make_test_image()
+    out = pixelate_image(
+        src, palette="auto", colors=4, pixel_size=16, upscale=1, dither="none"
+    )
+    assert "pixelate_palette" in out.info
+    pal = out.info["pixelate_palette"]
+    assert 1 <= len(pal) <= 4
+    unique = {tuple(int(x) for x in c) for c in np.array(out.convert("RGB")).reshape(-1, 3)}
+    assert unique.issubset({tuple(c) for c in pal})
+
+
+def test_spritesheet_preserves_alpha():
+    opaque = Image.new("RGB", (8, 8), (255, 0, 0))
+    trans = Image.new("RGBA", (8, 8), (0, 255, 0, 0))
+    sheet = make_spritesheet([opaque, trans], cols=2, padding=0)
+    assert sheet.mode == "RGBA"
+    arr = np.array(sheet)
+    # second tile is fully transparent
+    assert int(arr[0, 8, 3]) == 0
+
+
 def test_pixelate_new_palettes():
     src = _make_test_image()
     for name in ("ega", "msx", "vaporwave", "db16", "sms", "master-system"):
@@ -135,6 +188,6 @@ def test_pixelate_new_palettes():
 
 def test_pixelate_new_dithers():
     src = _make_test_image()
-    for dither in ("stucki", "burkes", "sierra"):
+    for dither in ("stucki", "burkes", "sierra", "jjn"):
         out = pixelate_image(src, palette="cga", pixel_size=16, upscale=1, dither=dither)
         assert isinstance(out, Image.Image)

@@ -71,6 +71,11 @@ def print_palette_table(palettes: dict) -> None:
         "tokyo-night": "Tokyo Night dark theme",
         "tokyo": "Tokyo Night (alias)",
         "cyberpunk": "Neon cyberpunk night",
+        "sweetie16": "Lospec Sweetie 16 (GrafxKid)",
+        "sweetie-16": "Sweetie 16 (alias)",
+        "endesga32": "Endesga 32 (NYKRA)",
+        "endesga-32": "Endesga 32 (alias)",
+        "macintosh": "Apple Macintosh 16-color System",
     }
 
     for name, count in sorted(palettes.items()):

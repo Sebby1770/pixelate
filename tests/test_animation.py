@@ -95,6 +95,21 @@ def test_pixelate_animation_saves_gif(tmp_path: Path):
         assert saved.n_frames == 3
 
 
+def test_save_animation_shared_palette_no_invented_colors(tmp_path: Path):
+    a = Image.new("RGB", (8, 8), (255, 0, 0))
+    b = Image.new("RGB", (8, 8), (0, 255, 0))
+    pal = ((255, 0, 0), (0, 255, 0), (0, 0, 0))
+    out = tmp_path / "locked.gif"
+    save_animation([a, b], [80, 80], out, palette=pal)
+    assert out.is_file()
+    with Image.open(out) as saved:
+        assert saved.n_frames == 2
+        for i in range(saved.n_frames):
+            saved.seek(i)
+            unique = {tuple(c) for c in np.array(saved.convert("RGB")).reshape(-1, 3)}
+            assert unique.issubset(set(pal))
+
+
 def test_save_animation_roundtrip(tmp_path: Path):
     a = _make_still((16, 16))
     b_arr = np.zeros((16, 16, 3), dtype=np.uint8)

@@ -3,7 +3,8 @@ Animated GIF / multi-frame WebP support.
 
 Detect multi-frame inputs, pixelate each frame with the same pipeline as
 ``pixelate_image``, and reassemble an animated GIF preserving approximate
-frame durations.
+frame durations. Frames are written as mode-P GIFs with a shared palette
+from the working colors (Pillow is not allowed to invent extra colors).
 """
 
 from __future__ import annotations
@@ -11,9 +12,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple, Union
 
-from PIL import Image
+from PIL import Image, ImageOps
 
-from pixelate.core import pixelate_image
+from pixelate.core import (
+    PALETTE_INFO_KEY,
+    collect_working_colors,
+    image_has_alpha,
+    image_to_indexed,
+    pixelate_image,
+)
+from pixelate.palettes import RGB
 
 PathLike = Union[str, Path]
 FrameList = List[Image.Image]
@@ -30,12 +38,21 @@ def is_animated(src: Union[PathLike, Image.Image]) -> bool:
         return bool(getattr(img, "is_animated", False) and getattr(img, "n_frames", 1) > 1)
 
 
+def _working_frame(frame: Image.Image) -> Image.Image:
+    """EXIF-correct a single frame, preserving alpha when present."""
+    frame = ImageOps.exif_transpose(frame)
+    if image_has_alpha(frame):
+        return frame.convert("RGBA").copy()
+    return frame.convert("RGB").copy()
+
+
 def load_frames(src: Union[PathLike, Image.Image]) -> Tuple[FrameList, DurationList]:
     """
     Load all frames and their durations (ms) from an animated image.
 
     For still images, returns a single frame with duration 100ms.
     Duration defaults to 100ms when not stored in the source.
+    Applies EXIF orientation and keeps RGBA when the source has alpha.
     """
     close_after = False
     if isinstance(src, Image.Image):
@@ -51,8 +68,7 @@ def load_frames(src: Union[PathLike, Image.Image]) -> Tuple[FrameList, DurationL
     try:
         for i in range(n_frames):
             img.seek(i)
-            frame = img.convert("RGB").copy()
-            frames.append(frame)
+            frames.append(_working_frame(img))
             duration = img.info.get("duration", 100)
             if duration is None or duration <= 0:
                 duration = 100
@@ -82,6 +98,8 @@ def pixelate_animation(
     edges: bool = False,
     invert: bool = False,
     contrast: float = 1.0,
+    colorspace: str = "lab",
+    serpentine: bool = True,
 ) -> Union[Image.Image, Tuple[FrameList, DurationList]]:
     """
     Pixelate every frame of an animated (or still) image.
@@ -92,8 +110,8 @@ def pixelate_animation(
         Path or PIL Image (animated GIF/WebP or still).
     palette, pixel_size, dither, upscale, saturation, crt, scanlines, palette_file :
         Forwarded to :func:`pixelate.core.pixelate_image` for each frame.
-    colors, extract_method, scale, edges, invert, contrast :
-        Additional v2.1 pipeline options forwarded per frame.
+    colors, extract_method, scale, edges, invert, contrast, colorspace, serpentine :
+        Additional pipeline options forwarded per frame.
     output :
         If given, save an animated GIF to this path and return the first
         frame image (for convenience). If ``None``, return
@@ -138,11 +156,16 @@ def pixelate_animation(
             edges=edges,
             invert=invert,
             contrast=contrast,
+            colorspace=colorspace,
+            serpentine=serpentine,
         )
-        out_frames.append(result.convert("RGB"))
+        out_frames.append(result)
 
     if output is not None:
-        save_animation(out_frames, durations, output)
+        shared = None
+        if out_frames:
+            shared = out_frames[0].info.get(PALETTE_INFO_KEY)
+        save_animation(out_frames, durations, output, palette=shared)
         return out_frames[0]
 
     return out_frames, durations
@@ -154,14 +177,19 @@ def save_animation(
     path: PathLike,
     *,
     loop: int = 0,
+    palette: Optional[Sequence[RGB]] = None,
 ) -> Path:
     """
     Save frames as an animated GIF.
 
+    Frames are converted to mode ``P`` with a **shared** palette taken from
+    the working colors (or *palette* when it covers every pixel). Pillow is
+    not asked to invent extra colors. ``disposal=2`` is always set.
+
     Parameters
     ----------
     frames :
-        Pixelated RGB frames (must be non-empty).
+        Pixelated RGB/RGBA frames (must be non-empty).
     durations :
         Per-frame duration in milliseconds. If shorter than *frames*, the
         last duration is reused.
@@ -169,6 +197,8 @@ def save_animation(
         Output path (``.gif`` recommended).
     loop :
         Number of loops; ``0`` means infinite.
+    palette :
+        Optional RGB sequence to use when it contains all working colors.
     """
     if not frames:
         raise ValueError("No frames to save")
@@ -176,15 +206,21 @@ def save_animation(
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
 
-    rgb_frames = [f.convert("RGB") for f in frames]
+    working = collect_working_colors(frames)
+    if palette is not None:
+        pal_t = tuple((int(c[0]), int(c[1]), int(c[2])) for c in palette)
+        if set(working).issubset(set(pal_t)) and pal_t:
+            working = pal_t
+
+    p_frames = [image_to_indexed(f, working) for f in frames]
     durs: list[int] = []
-    for i in range(len(rgb_frames)):
+    for i in range(len(p_frames)):
         if i < len(durations):
             durs.append(max(1, int(durations[i])))
         else:
             durs.append(max(1, int(durations[-1]) if durations else 100))
 
-    first, rest = rgb_frames[0], rgb_frames[1:]
+    first, rest = p_frames[0], p_frames[1:]
     save_kwargs = {
         "save_all": True,
         "append_images": list(rest),

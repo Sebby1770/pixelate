@@ -5,50 +5,91 @@ These take an RGB image (numpy array, float) and a palette (numpy array of
 RGB rows) and produce an image where each pixel has been mapped to the
 nearest palette color, with quantization error spread to neighboring pixels
 to preserve perceived detail.
+
+Nearest-color matching defaults to CIE L*a*b* (CIE76). Pass ``space="rgb"``
+for classic Euclidean RGB. Error-diffusion kernels default to serpentine
+scanning (even rows L→R, odd rows R→L with the kernel's dx mirrored).
 """
 
 from __future__ import annotations
 
-from typing import Callable, List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
+
+from pixelate.colorspace import nearest_palette_indices, srgb_to_lab
 
 # (dy, dx, weight) — error distribution kernels
 Kernel = List[Tuple[int, int, float]]
 
 
-def _nearest_color(pixel: np.ndarray, palette: np.ndarray) -> np.ndarray:
-    """Return the palette color closest to `pixel` (Euclidean RGB)."""
-    diffs = palette - pixel
+def _palette_lab(palette: np.ndarray) -> np.ndarray:
+    return srgb_to_lab(np.clip(np.asarray(palette, dtype=np.float64), 0, 255))
+
+
+def _nearest_color(
+    pixel: np.ndarray,
+    palette: np.ndarray,
+    space: str = "lab",
+    palette_lab: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Return the palette color closest to `pixel` (Lab CIE76 or RGB Euclidean)."""
+    pix = np.clip(np.asarray(pixel, dtype=np.float64).reshape(1, 3), 0, 255)
+    key = str(space).lower().strip()
+    if key == "rgb":
+        diffs = palette.astype(np.float64) - pix.reshape(3)
+        distances = np.einsum("ij,ij->i", diffs, diffs)
+        return palette[int(np.argmin(distances))]
+    if key != "lab":
+        raise ValueError(f"Unknown colorspace '{space}'. Use 'rgb' or 'lab'.")
+    if palette_lab is None:
+        palette_lab = _palette_lab(palette)
+    pix_lab = srgb_to_lab(pix)
+    diffs = palette_lab - pix_lab
     distances = np.einsum("ij,ij->i", diffs, diffs)
     return palette[int(np.argmin(distances))]
 
 
-def quantize_no_dither(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
+def quantize_no_dither(
+    image: np.ndarray,
+    palette: np.ndarray,
+    space: str = "lab",
+    serpentine: bool = True,  # unused; accepted so dither_image can pass it
+) -> np.ndarray:
     """Map each pixel to the nearest palette color (vectorized, no dithering)."""
+    del serpentine
     h, w, _ = image.shape
-    flat = image.reshape(-1, 3)
-    # (N, 1, 3) - (1, P, 3) -> (N, P, 3)
-    diffs = flat[:, None, :] - palette[None, :, :]
-    dist = np.einsum("ijk,ijk->ij", diffs, diffs)
-    idx = np.argmin(dist, axis=1)
-    out = palette[idx].reshape(h, w, 3)
-    return out
+    flat = np.clip(np.asarray(image).reshape(-1, 3), 0, 255)
+    idx = nearest_palette_indices(flat, palette, space=space)
+    out = np.asarray(palette)[idx].reshape(h, w, 3)
+    return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def _error_diffuse(image: np.ndarray, palette: np.ndarray, kernel: Kernel) -> np.ndarray:
+def _error_diffuse(
+    image: np.ndarray,
+    palette: np.ndarray,
+    kernel: Kernel,
+    serpentine: bool = True,
+    space: str = "lab",
+) -> np.ndarray:
     """Generic error-diffusion dither using an (dy, dx, weight) kernel."""
     img = image.astype(np.float32).copy()
     h, w, _ = img.shape
+    pal = np.asarray(palette, dtype=np.float32)
+    pal_lab = _palette_lab(pal) if str(space).lower().strip() == "lab" else None
 
     for y in range(h):
-        for x in range(w):
+        reverse = bool(serpentine) and (y % 2 == 1)
+        xs = range(w - 1, -1, -1) if reverse else range(w)
+        for x in xs:
             old = img[y, x].copy()
-            new = _nearest_color(old, palette)
+            new = _nearest_color(old, pal, space=space, palette_lab=pal_lab)
             img[y, x] = new
             error = old - new
 
             for dy, dx, weight in kernel:
+                if reverse:
+                    dx = -dx
                 ny, nx = y + dy, x + dx
                 if 0 <= ny < h and 0 <= nx < w:
                     img[ny, nx] += error * weight
@@ -56,12 +97,17 @@ def _error_diffuse(image: np.ndarray, palette: np.ndarray, kernel: Kernel) -> np
     return np.clip(img, 0, 255).astype(np.uint8)
 
 
-def floyd_steinberg(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
+def floyd_steinberg(
+    image: np.ndarray,
+    palette: np.ndarray,
+    space: str = "lab",
+    serpentine: bool = True,
+) -> np.ndarray:
     """
     Floyd-Steinberg error diffusion dithering.
 
     Diffuses quantization error to neighboring pixels using the classic
-    7/16, 3/16, 5/16, 1/16 distribution.
+    7/16, 3/16, 5/16, 1/16 distribution. Serpentine scanning is on by default.
     """
     kernel: Kernel = [
         (0, 1, 7 / 16),
@@ -69,10 +115,15 @@ def floyd_steinberg(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
         (1, 0, 5 / 16),
         (1, 1, 1 / 16),
     ]
-    return _error_diffuse(image, palette, kernel)
+    return _error_diffuse(image, palette, kernel, serpentine=serpentine, space=space)
 
 
-def atkinson(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
+def atkinson(
+    image: np.ndarray,
+    palette: np.ndarray,
+    space: str = "lab",
+    serpentine: bool = True,
+) -> np.ndarray:
     """
     Atkinson dithering — used by the original Apple Macintosh.
 
@@ -81,17 +132,22 @@ def atkinson(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
     """
     img = image.astype(np.float32).copy()
     h, w, _ = img.shape
-
+    pal = np.asarray(palette, dtype=np.float32)
+    pal_lab = _palette_lab(pal) if str(space).lower().strip() == "lab" else None
     offsets = [(0, 1), (0, 2), (1, -1), (1, 0), (1, 1), (2, 0)]
 
     for y in range(h):
-        for x in range(w):
+        reverse = bool(serpentine) and (y % 2 == 1)
+        xs = range(w - 1, -1, -1) if reverse else range(w)
+        for x in xs:
             old = img[y, x].copy()
-            new = _nearest_color(old, palette)
+            new = _nearest_color(old, pal, space=space, palette_lab=pal_lab)
             img[y, x] = new
             error = (old - new) / 8.0
 
             for dy, dx in offsets:
+                if reverse:
+                    dx = -dx
                 ny, nx = y + dy, x + dx
                 if 0 <= ny < h and 0 <= nx < w:
                     img[ny, nx] += error
@@ -99,7 +155,12 @@ def atkinson(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
     return np.clip(img, 0, 255).astype(np.uint8)
 
 
-def stucki(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
+def stucki(
+    image: np.ndarray,
+    palette: np.ndarray,
+    space: str = "lab",
+    serpentine: bool = True,
+) -> np.ndarray:
     """
     Stucki error diffusion dithering.
 
@@ -120,10 +181,15 @@ def stucki(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
         (2, 1, 2 / 42),
         (2, 2, 1 / 42),
     ]
-    return _error_diffuse(image, palette, kernel)
+    return _error_diffuse(image, palette, kernel, serpentine=serpentine, space=space)
 
 
-def burkes(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
+def burkes(
+    image: np.ndarray,
+    palette: np.ndarray,
+    space: str = "lab",
+    serpentine: bool = True,
+) -> np.ndarray:
     """
     Burkes error diffusion dithering.
 
@@ -139,15 +205,20 @@ def burkes(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
         (1, 1, 4 / 32),
         (1, 2, 2 / 32),
     ]
-    return _error_diffuse(image, palette, kernel)
+    return _error_diffuse(image, palette, kernel, serpentine=serpentine, space=space)
 
 
-def sierra(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
+def sierra(
+    image: np.ndarray,
+    palette: np.ndarray,
+    space: str = "lab",
+    serpentine: bool = True,
+) -> np.ndarray:
     """
-    Sierra two-row (Sierra-2-4A / Filter Lite variant) error diffusion.
+    Sierra-2 (two-row) error diffusion.
 
-    Diffuses error with a compact two-row kernel (div 16). Faster than full
-    Sierra-3 and Stucki while retaining good gradient quality.
+    Classic Sierra-2 kernel (div 16). This is not Sierra Filter Lite
+    (Sierra-2-4A), which uses a 3-element 1/2 + 1/4 + 1/4 kernel.
     """
     kernel: Kernel = [
         (0, 1, 4 / 16),
@@ -158,16 +229,56 @@ def sierra(image: np.ndarray, palette: np.ndarray) -> np.ndarray:
         (1, 1, 2 / 16),
         (1, 2, 1 / 16),
     ]
-    return _error_diffuse(image, palette, kernel)
+    return _error_diffuse(image, palette, kernel, serpentine=serpentine, space=space)
 
 
-def ordered_bayer(image: np.ndarray, palette: np.ndarray, matrix_size: int = 4) -> np.ndarray:
+def jarvis_judice_ninke(
+    image: np.ndarray,
+    palette: np.ndarray,
+    space: str = "lab",
+    serpentine: bool = True,
+) -> np.ndarray:
+    """
+    Jarvis-Judice-Ninke error diffusion (12-element kernel, div 48).
+
+    Wider than Floyd-Steinberg; smoother gradients, more of a "classic
+    print dither" look.
+    """
+    kernel: Kernel = [
+        (0, 1, 7 / 48),
+        (0, 2, 5 / 48),
+        (1, -2, 3 / 48),
+        (1, -1, 5 / 48),
+        (1, 0, 7 / 48),
+        (1, 1, 5 / 48),
+        (1, 2, 3 / 48),
+        (2, -2, 1 / 48),
+        (2, -1, 3 / 48),
+        (2, 0, 5 / 48),
+        (2, 1, 3 / 48),
+        (2, 2, 1 / 48),
+    ]
+    return _error_diffuse(image, palette, kernel, serpentine=serpentine, space=space)
+
+
+# Short alias used by the CLI / DITHER_ALGORITHMS registry
+jjn = jarvis_judice_ninke
+
+
+def ordered_bayer(
+    image: np.ndarray,
+    palette: np.ndarray,
+    matrix_size: int = 4,
+    space: str = "lab",
+    serpentine: bool = True,
+) -> np.ndarray:
     """
     Ordered (Bayer) dithering — produces the iconic crosshatched pattern.
 
     Adds a threshold pattern from a Bayer matrix before quantization, so
     error becomes a regular geometric texture rather than diffused noise.
     """
+    del serpentine
     if matrix_size == 2:
         bayer = np.array([[0, 2], [3, 1]]) / 4.0
     elif matrix_size == 4:
@@ -195,7 +306,7 @@ def ordered_bayer(image: np.ndarray, palette: np.ndarray, matrix_size: int = 4) 
     # Scale threshold contribution; 32 is a balanced spread for 8-bit RGB
     img = image.astype(np.float32) + (threshold[..., None] - 0.5) * 32.0
     img = np.clip(img, 0, 255)
-    return quantize_no_dither(img, palette)
+    return quantize_no_dither(img, palette, space=space)
 
 
 DITHER_ALGORITHMS: dict[str, Callable[..., np.ndarray]] = {
@@ -206,6 +317,7 @@ DITHER_ALGORITHMS: dict[str, Callable[..., np.ndarray]] = {
     "stucki": stucki,
     "burkes": burkes,
     "sierra": sierra,
+    "jjn": jarvis_judice_ninke,
 }
 
 
@@ -216,3 +328,21 @@ def get_dither(name: str) -> Callable[..., np.ndarray]:
         available = ", ".join(DITHER_ALGORITHMS)
         raise KeyError(f"Unknown dither '{name}'. Available: {available}")
     return DITHER_ALGORITHMS[key]
+
+
+def dither_image(
+    image: np.ndarray,
+    palette: np.ndarray,
+    name: str,
+    space: str = "lab",
+    serpentine: bool = True,
+) -> np.ndarray:
+    """
+    Apply a named dither with matching space and serpentine scanning.
+
+    All pipeline callers should use this rather than invoking kernel
+    functions directly, so Lab matching and serpentine stay consistent.
+    """
+    fn = get_dither(name)
+    out = fn(image, palette, space=space, serpentine=serpentine)
+    return np.clip(out, 0, 255).astype(np.uint8)

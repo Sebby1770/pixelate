@@ -4,6 +4,8 @@ Load and register custom color palettes from files.
 Supported formats:
   - ``.hex`` — one RRGGBB or #RRGGBB color per line
   - ``.gpl`` — GIMP Palette files (``Name:`` header + RGB lines)
+
+``save_gpl`` / ``save_hex`` write the same formats.
 """
 
 from __future__ import annotations
@@ -157,6 +159,60 @@ def register_palette_file(name: str, path: PathLike) -> Palette:
     """Load a palette file and register it under *name*."""
     colors = load_palette_file(path)
     return register_palette(name, colors)
+
+
+def save_gpl(
+    colors: Sequence[RGB],
+    path: PathLike,
+    name: str = "PIXELATE",
+) -> Path:
+    """
+    Write colors as a GIMP ``.gpl`` palette file.
+
+    Parameters
+    ----------
+    colors :
+        RGB triples.
+    path :
+        Destination path (parent dirs are created).
+    name :
+        Value for the ``Name:`` header.
+    """
+    if not colors:
+        raise ValueError("Palette must contain at least one color")
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "GIMP Palette",
+        f"Name: {name}",
+        "Columns: 16",
+        "#",
+    ]
+    for i, c in enumerate(colors):
+        r, g, b = int(c[0]), int(c[1]), int(c[2])
+        if not all(0 <= v <= 255 for v in (r, g, b)):
+            raise ValueError(f"Color out of range: {(r, g, b)}")
+        lines.append(f"{r:3d} {g:3d} {b:3d} Index {i}")
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return p
+
+
+def save_hex(colors: Sequence[RGB], path: PathLike) -> Path:
+    """
+    Write colors as a ``.hex`` file (one ``#RRGGBB`` per line).
+    """
+    if not colors:
+        raise ValueError("Palette must contain at least one color")
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for c in colors:
+        r, g, b = int(c[0]), int(c[1]), int(c[2])
+        if not all(0 <= v <= 255 for v in (r, g, b)):
+            raise ValueError(f"Color out of range: {(r, g, b)}")
+        lines.append(f"#{r:02X}{g:02X}{b:02X}")
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return p
 
 
 def colors_from_iterable(colors: Iterable[RGB]) -> Palette:
