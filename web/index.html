@@ -15,7 +15,7 @@
   <div class="app">
     <header class="mast">
       <pre class="logo" aria-label="PIXELATE">PIXELATE</pre>
-      <p class="tag">web lab · v2.4.0 · drop zone · file stays in the browser · lab matching</p>
+      <p class="tag">web lab · v2.5.0 · drop zone · file stays in the browser · box downscale · lab matching</p>
     </header>
 
     <section class="rack">
@@ -41,7 +41,18 @@
           <option value="atkinson">atkinson</option>
           <option value="bayer">bayer</option>
           <option value="jjn">jjn</option>
+          <option value="sierra3">sierra3</option>
+          <option value="sierra-lite">sierra-lite</option>
           <option value="none">none</option>
+        </select>
+      </label>
+
+      <label class="field">
+        downscale
+        <select id="downscale">
+          <option value="box" selected>box</option>
+          <option value="lanczos">lanczos</option>
+          <option value="nearest">nearest</option>
         </select>
       </label>
 

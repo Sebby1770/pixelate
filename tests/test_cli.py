@@ -170,6 +170,37 @@ def test_batch_jobs_2(tmp_path: Path):
     assert len(pngs) == 2
 
 
+def test_convert_downscale_nearest_distance_ciede2000(tmp_path: Path):
+    src = _write_rgb(tmp_path / "photo.png")
+    dest = tmp_path / "out.png"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "convert",
+            str(src),
+            "-o", str(dest),
+            "--downscale", "nearest",
+            "--distance", "ciede2000",
+            "--dither", "none",
+            "--pixel-size", "16",
+            "--upscale", "1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert dest.is_file()
+    with Image.open(dest) as im:
+        assert im.size[0] > 0 and im.size[1] > 0
+
+
+def test_batch_convert_one_is_picklable():
+    import pickle
+
+    from pixelate.cli import _batch_convert_one
+
+    pickle.dumps(_batch_convert_one)
+
+
 def test_palettes_save_gpl(tmp_path: Path):
     dest = tmp_path / "gb.gpl"
     runner = CliRunner()

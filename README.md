@@ -7,7 +7,7 @@
 ██╔═══╝ ██║ ██╔██╗ ██╔══╝  ██║     ██╔══██║   ██║   ██╔══╝
 ██║     ██║██╔╝ ██╗███████╗███████╗██║  ██║   ██║   ███████╗
 ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
-        retro pixel art from any image  ·  v2.4.0
+        retro pixel art from any image  ·  v2.5.0
 ```
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
@@ -17,7 +17,7 @@
 
 **Web lab:** [https://sebby1770.github.io/pixelate/](https://sebby1770.github.io/pixelate/)
 
-> Turn any image (or animated GIF) into authentic retro pixel art using classic gaming palettes, **CIELAB (CIE76) matching**, Lab-space k-means++ auto palettes, serpentine error diffusion, eight dithering algorithms (including JJN), CRT bloom + phosphor + scanlines, indexed PNG/GIF, parallel batch conversion, palette compare grids, and spritesheet export. Or open the static **web playground**. Or print it as ANSI art straight to your terminal.
+> Turn any image (or animated GIF) into authentic retro pixel art using classic gaming palettes, **box (area) downscale**, **CIELAB (CIE76) matching** with optional **CIEDE2000**, Lab-space k-means++ auto palettes, serpentine error diffusion, Sierra-3 / Sierra Lite plus the rest of the classic kernels, CRT bloom + phosphor + scanlines, indexed PNG/GIF, process-pool batch conversion, palette compare grids, and spritesheet export. Or open the static **web playground**. Or print it as ANSI art straight to your terminal.
 
 ---
 
@@ -34,19 +34,24 @@
 
 Modern image filters smooth everything out. PIXELATE goes the other way — it crushes color depth down to the exact palettes used by the consoles and home computers of the 80s and 90s, dithers cleverly to preserve detail, and gives you a finished pixel-art image that looks like it shipped on a cartridge.
 
-## Features (v2.4)
+## Features (v2.5)
 
+- **Authentic box downscale** — `--downscale box|lanczos|nearest` (default **box**). Area averaging keeps chunky pixels; Lanczos was blurring before quantize.
+- **CIEDE2000 matching** — `--distance ciede2000` (alias `--colorspace`). Default remains CIE76 `lab` so 2.4 palettes don't silently shift.
+- **Sierra-3 + Sierra Lite** — `--dither sierra3` and `--dither sierra-lite` (alias `sierra_lite`). Existing `sierra` is still Sierra-2.
+- **`--seed` samples too** — auto-palette pixel subsample uses the same seed as k-means (was hardcoded 42).
+- **Batch `--jobs N`** — `ProcessPoolExecutor` when N>1 (falls back to threads on spawn failure). `jobs=1` stays in-process.
+- **Web lab** — downscale select (box / lanczos / nearest), sierra3 / sierra-lite, version 2.5.0.
 - **Lab k-means auto palette** — `--palette auto` clusters in CIE L*a*b* with k-means++ (same space as matching).
-- **`--seed`** — RNG seed for auto k-means (default 0); `lab_to_srgb()` is the vectorized inverse of `srgb_to_lab`.
-- **Batch `--jobs N`** — parallel workers via `ThreadPoolExecutor` when N>1 (default 1 is sequential).
+- **`--seed`** — RNG seed for auto k-means and subsample (k-means default 0); `lab_to_srgb()` / `ciede2000()`.
 - **Web lab phosphor + posterize** — RGB column stripes on the output canvas; posterize 0=off or 2–8 before dither.
 - **k-means++ auto palette** — `--palette auto` clusters with k-means++ (deterministic seed).
 - **CRT order + phosphor** — bloom, then RGB phosphor mask (`--phosphor`), then sharp scanlines.
 - **Bayer size** — `--bayer-size 2|4|8` (default 4) when `--dither bayer`.
 - **Posterize** — `--posterize N` (2–16 levels) before quantize.
-- **CIELAB matching** — nearest palette color uses CIE76 Lab by default (`--colorspace lab|rgb`).
+- **CIELAB matching** — nearest palette color uses CIE76 Lab by default (`--colorspace` / `--distance lab|rgb|ciede2000`).
 - **Serpentine dither** — error diffusion scans odd rows right-to-left (`--no-serpentine` to disable).
-- **Jarvis-Judice-Ninke** — `--dither jjn` plus floyd / atkinson / bayer / stucki / burkes / sierra / none.
+- **Jarvis-Judice-Ninke** — `--dither jjn` plus floyd / atkinson / bayer / stucki / burkes / sierra / sierra3 / sierra-lite / none.
 - **Alpha + EXIF** — orientation is respected; transparent sources stay RGBA; spritesheets keep tile alpha.
 - **Indexed PNG / locked GIF** — JPEG destinations become PNG; stills can write mode-`P` with the exact palette; GIFs share one palette (`disposal=2`).
 - **Auto palette + honest `--report`** — working colors live on `result.info["pixelate_palette"]` (extracted after preprocess+resize).
@@ -66,7 +71,7 @@ Modern image filters smooth everything out. PIXELATE goes the other way — it c
 - **CRT effects** — soft bloom + vignette, optional phosphor grille, horizontal scanlines.
 - **ASCII / ANSI mode** — render any image as colored terminal art.
 - **Beautifully retro CLI** — green-on-black banner, palette previews, swatches, progress bars.
-- **Clean Python API** — `pixelate_image()`, `dither_image()`, `srgb_to_lab()`, `lab_to_srgb()`, `extract_palette()`, `compare_palettes()`, and more.
+- **Clean Python API** — `pixelate_image()`, `dither_image()`, `srgb_to_lab()`, `lab_to_srgb()`, `ciede2000()`, `extract_palette()`, `compare_palettes()`, and more.
 
 ## Install
 
@@ -96,8 +101,10 @@ python -m pixelate --help
 
 ```bash
 pixelate convert photo.jpg --palette gameboy --pixel-size 96 --dither floyd
-# Lab matching + serpentine are the defaults
+# Lab matching + serpentine + box downscale are the defaults
 pixelate convert photo.jpg --colorspace rgb --no-serpentine --dither jjn
+pixelate convert photo.jpg --downscale nearest --distance ciede2000 --dither none
+pixelate convert photo.jpg --dither sierra3 --downscale box
 ```
 
 Auto palette from the image:
@@ -174,7 +181,7 @@ pixelate convert walk_cycle.gif --palette pico8 --pixel-size 64 -o walk_pixel.gi
 ```bash
 pixelate batch ./photos -o ./pixelated --palette vaporwave --dither sierra
 pixelate batch ./sprites -o ./out --recursive --palette db16
-pixelate batch ./photos -o ./out --jobs 4 --palette auto --colors 12
+pixelate batch ./photos -o ./out --jobs 4 --palette auto --colors 12 --seed 1
 ```
 
 ### Spritesheet
@@ -205,7 +212,7 @@ pixelate preview macintosh
 
 ### Web playground
 
-Open `web/index.html` locally (or the GitHub Pages deploy). Drop an image onto the lab, pick a palette / dither, toggle serpentine / phosphor, posterize, compare two palettes, download a PNG. Processing is entirely in the browser.
+Open `web/index.html` locally (or the GitHub Pages deploy). Drop an image onto the lab, pick a palette / dither / downscale filter, toggle serpentine / phosphor, posterize, compare two palettes, download a PNG. Processing is entirely in the browser.
 
 ## CLI reference
 
@@ -215,10 +222,12 @@ pixelate convert IMAGE [OPTIONS]
       --palette-file    .hex or .gpl path (overrides --palette)
       --colors          color count for auto palette (default 16)
       --extract-method  kmeans | median-cut
-      --seed INT        auto-palette k-means RNG seed (default 0)
+      --seed INT        auto-palette k-means + subsample RNG seed
   -s, --pixel-size      Resolution of longest side (8–1024)
+      --downscale       box (default) | lanczos | nearest
   -d, --dither          none | floyd | atkinson | bayer |
-                        stucki | burkes | sierra | jjn
+                        stucki | burkes | sierra | sierra3 |
+                        sierra-lite | jjn
   -u, --upscale         1–16 (output pixels per logical pixel)
       --scale           1–32 extra nearest-neighbor upscale
       --saturation      0.0–3.0 (pre-quantize boost)
@@ -230,7 +239,8 @@ pixelate convert IMAGE [OPTIONS]
       --phosphor        RGB phosphor column mask
       --posterize N     Bit-crush channels to N levels (2–16)
       --bayer-size      2 | 4 | 8 (default 4; Bayer only)
-      --colorspace      lab (default, CIE76) | rgb
+      --colorspace / --distance
+                        lab (default, CIE76) | rgb | ciede2000
       --serpentine / --no-serpentine
       --report          Print color usage table
   -o, --output          Output path (JPEG suffixes become .png)
@@ -243,7 +253,7 @@ pixelate compare IMAGE [OPTIONS]
 
 pixelate batch INPUT_DIR -o OUTPUT_DIR [same convert options]
   -r, --recursive       Scan subdirectories
-      --jobs N          Parallel workers (default 1; ThreadPoolExecutor when >1)
+      --jobs N          Parallel workers (default 1; ProcessPoolExecutor when >1)
 
 pixelate sheet PATH [PATH...] [OPTIONS]
   --cols N              Grid columns (default 4)
@@ -307,6 +317,7 @@ from pixelate import (
     load_palette_file,
     srgb_to_lab,
     lab_to_srgb,
+    ciede2000,
     dither_image,
     save_gpl,
     save_hex,
@@ -318,6 +329,7 @@ img = pixelate_image(
     pixel_size=128,
     dither="jjn",
     colorspace="lab",
+    downscale="box",
     serpentine=True,
     upscale=4,
     scale=2,
@@ -375,10 +387,10 @@ sheet.save("sheet.png")
 ## How it works
 
 1. **Pre-process (optional)** — invert, contrast, saturation, edge-aware sharpen, posterize.
-2. **Resize** — the source image is downsampled with Lanczos to a low resolution (you control this — `pixel_size`). This is the actual "pixelation."
+2. **Resize** — the source is downsampled with a **box (area) filter** by default (authentic pixel art). Lanczos blurs before quantize; nearest is point-sample. You control the long-side size with `pixel_size`.
 3. **Palette** — built-in name, custom file, RGB sequence, or **auto** extract via Lab k-means++ / median-cut.
-4. **Quantize** — every pixel is matched against the chosen palette using CIE76 Lab (default) or Euclidean RGB.
-5. **Dither** — quantization error is spread with serpentine kernels (Floyd-Steinberg, Atkinson, Stucki, Burkes, Sierra, JJN) or hidden in a Bayer pattern (`--bayer-size`).
+4. **Quantize** — every pixel is matched against the chosen palette using CIE76 Lab (default), Euclidean RGB, or CIEDE2000.
+5. **Dither** — quantization error is spread with serpentine kernels (Floyd-Steinberg, Atkinson, Stucki, Burkes, Sierra-2, Sierra-3, Sierra Lite, JJN) or hidden in a Bayer pattern (`--bayer-size`).
 6. **Upscale** — the small image is enlarged with nearest-neighbor so the pixels stay crisp and chunky (`upscale`, then optional extra `--scale`).
 7. **Effects (optional)** — CRT bloom, then phosphor mask, then scanlines (scanlines stay sharp).
 8. **Animation** — multi-frame sources run the pipeline per frame, then reassemble with original durations.
@@ -401,11 +413,11 @@ pixelate/
 │   ├── __main__.py
 │   ├── cli.py          # Click CLI (convert, compare, batch, sheet, extract, ascii, palettes)
 │   ├── core.py         # Conversion pipeline, auto palette, compare, report, indexed I/O
-│   ├── colorspace.py   # sRGB ↔ Lab, nearest-palette indices
+│   ├── colorspace.py   # sRGB ↔ Lab, CIEDE2000, nearest-palette indices
 │   ├── animation.py    # Multi-frame GIF/WebP (shared P palette)
 │   ├── palette_io.py   # .hex / .gpl load + save + register_palette
 │   ├── palettes.py     # Built-in retro palettes
-│   ├── dithering.py    # FS, Atkinson, Bayer, Stucki, Burkes, Sierra, JJN
+│   ├── dithering.py    # FS, Atkinson, Bayer, Stucki, Burkes, Sierra-2/3/Lite, JJN
 │   ├── effects.py      # CRT bloom, phosphor, scanlines
 │   ├── ascii_art.py    # ASCII / ANSI rendering
 │   └── ui.py           # Rich-styled banner + tables
@@ -435,6 +447,7 @@ pixelate/
 - [x] Optional LAB / perceptual color distance (CIE76, default)
 - [x] k-means++ auto palette, phosphor mask, Bayer size, posterize pre-pass
 - [x] Lab-space k-means, `--seed`, batch `--jobs`, web phosphor/posterize
+- [x] Box downscale, CIEDE2000, Sierra-3 / Sierra Lite, seeded subsample, process-pool batch
 
 ## License
 

@@ -159,3 +159,27 @@ def test_extract_palette_seed_0_vs_1():
         for c in pal:
             assert len(c) == 3
             assert all(0 <= v <= 255 for v in c)
+
+
+def test_extract_palette_seed_1_vs_2_may_differ():
+    """Seed 1 vs 2 on a large gradient: palettes can differ (skip if identical)."""
+    y, x = np.mgrid[0:128, 0:128]
+    arr = np.stack(
+        [
+            (x * 2).astype(np.uint8),
+            (y * 2).astype(np.uint8),
+            ((x + y)).astype(np.uint8),
+        ],
+        axis=-1,
+    )
+    src = Image.fromarray(arr, mode="RGB")
+    a = extract_palette(src, n=8, method="kmeans", seed=1)
+    b = extract_palette(src, n=8, method="kmeans", seed=2)
+    assert 1 <= len(a) <= 8
+    assert 1 <= len(b) <= 8
+    for pal in (a, b):
+        for c in pal:
+            assert len(c) == 3
+            assert all(0 <= v <= 255 for v in c)
+    if a == b:
+        return

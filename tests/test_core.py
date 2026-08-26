@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image
 
 from pixelate.core import (
+    _resize_keep_aspect,
     collect_images,
     make_spritesheet,
     pixelate_image,
@@ -45,6 +46,45 @@ def test_pixelate_image_respects_pixel_size():
     out = pixelate_image(src, palette="gameboy", pixel_size=32, upscale=1, dither="none")
     # Longest side downscaled to 32 before upscale=1
     assert max(out.size) == 32
+
+
+def test_box_downscale_32_to_pixel_size_8():
+    src = _make_test_image(size=(32, 32))
+    out = pixelate_image(
+        src, palette="gameboy", pixel_size=8, upscale=1, dither="none", downscale="box"
+    )
+    assert max(out.size) == 8
+    resized = _resize_keep_aspect(src, 8, filter="box")
+    assert max(resized.size) == 8
+
+
+def test_downscale_filters_keep_long_side():
+    src = _make_test_image(size=(32, 16))
+    for filt in ("box", "lanczos", "nearest"):
+        out = pixelate_image(
+            src,
+            palette="cga",
+            pixel_size=8,
+            upscale=1,
+            dither="none",
+            downscale=filt,
+        )
+        assert max(out.size) == 8
+
+
+def test_ciede2000_output_subset_of_palette():
+    src = _make_test_image()
+    pal = set(get_palette("cga"))
+    out = pixelate_image(
+        src,
+        palette="cga",
+        pixel_size=16,
+        upscale=1,
+        dither="none",
+        colorspace="ciede2000",
+    )
+    unique = {tuple(int(x) for x in c) for c in np.array(out).reshape(-1, 3)}
+    assert unique.issubset(pal)
 
 
 def test_pixelate_image_upscale_multiplies_size():
@@ -188,9 +228,11 @@ def test_pixelate_new_palettes():
 
 def test_pixelate_new_dithers():
     src = _make_test_image()
-    for dither in ("stucki", "burkes", "sierra", "jjn"):
+    for dither in ("stucki", "burkes", "sierra", "sierra3", "sierra-lite", "jjn"):
         out = pixelate_image(src, palette="cga", pixel_size=16, upscale=1, dither=dither)
         assert isinstance(out, Image.Image)
+        unique = {tuple(int(x) for x in c) for c in np.array(out).reshape(-1, 3)}
+        assert unique.issubset(set(get_palette("cga")))
 
 
 def test_posterize_output_subset_of_palette():

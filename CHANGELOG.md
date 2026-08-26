@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.5.0] — 2026-08-26
+
+### Added
+
+- **Box downscale** — `_resize_keep_aspect(..., filter="box")` uses Pillow `Image.BOX` (area average). CLI `--downscale box|lanczos|nearest` (default **box**). Threaded through convert / animation / batch / sheet. Web lab downscale select (box averages source blocks; lanczos = smoothing on; nearest = smoothing off).
+- **CIEDE2000** — `ciede2000(lab1, lab2)` vectorized over Nx3 vs Px3 (or pairwise NxP). `nearest_palette_indices(..., space="ciede2000")`. `--distance ciede2000` (alias `--colorspace`). Default matching stays **lab** (CIE76).
+- **Sierra-3 / Sierra Lite** — `--dither sierra3` (5/32, 3/32; 2,4,5,4,2 /32; 2,3,2 /32) and `--dither sierra-lite` (alias `sierra_lite`). Existing `sierra` remains Sierra-2.
+- **Seeded subsample** — `_unique_sample_pixels(..., seed=42)`; `extract_palette(..., seed=)` and CLI `--seed` now seed both the pixel subsample RNG and k-means.
+- **Process-pool batch** — `--jobs N` (N>1) uses `ProcessPoolExecutor` via module-level `pixelate.cli._batch_convert_one`; falls back to `ThreadPoolExecutor` on spawn failure. `jobs=1` stays in-process.
+- **Web 2.5.0** — downscale select, sierra3 / sierra-lite.
+
+### Tests
+
+- Box downscale 32×32 → pixel_size 8 (long side 8), sierra3 / sierra-lite ⊆ palette, CIEDE2000 nearest index in range, seed 1 vs 2 on a gradient, CLI `--downscale nearest --distance ciede2000 --dither none`.
+
 ## [2.4.0] — 2026-08-26
 
 ### Added

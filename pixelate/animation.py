@@ -104,6 +104,8 @@ def pixelate_animation(
     posterize: Optional[int] = None,
     bayer_size: int = 4,
     seed: Optional[int] = None,
+    downscale: str = "box",
+    distance: Optional[str] = None,
 ) -> Union[Image.Image, Tuple[FrameList, DurationList]]:
     """
     Pixelate every frame of an animated (or still) image.
@@ -115,7 +117,7 @@ def pixelate_animation(
     palette, pixel_size, dither, upscale, saturation, crt, scanlines, palette_file :
         Forwarded to :func:`pixelate.core.pixelate_image` for each frame.
     colors, extract_method, scale, edges, invert, contrast, colorspace, serpentine,
-    phosphor, posterize, bayer_size, seed :
+    phosphor, posterize, bayer_size, seed, downscale, distance :
         Additional pipeline options forwarded per frame.
     output :
         If given, save an animated GIF to this path and return the first
@@ -167,6 +169,8 @@ def pixelate_animation(
             posterize=posterize,
             bayer_size=bayer_size,
             seed=seed,
+            downscale=downscale,
+            distance=distance,
         )
         out_frames.append(result)
 

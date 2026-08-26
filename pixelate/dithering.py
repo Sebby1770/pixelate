@@ -7,8 +7,9 @@ nearest palette color, with quantization error spread to neighboring pixels
 to preserve perceived detail.
 
 Nearest-color matching defaults to CIE L*a*b* (CIE76). Pass ``space="rgb"``
-for classic Euclidean RGB. Error-diffusion kernels default to serpentine
-scanning (even rows L→R, odd rows R→L with the kernel's dx mirrored).
+for classic Euclidean RGB, or ``space="ciede2000"`` for CIEDE2000. Error-diffusion
+kernels default to serpentine scanning (even rows L→R, odd rows R→L with the
+kernel's dx mirrored).
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 
-from pixelate.colorspace import nearest_palette_indices, srgb_to_lab
+from pixelate.colorspace import ciede2000, nearest_palette_indices, srgb_to_lab
 
 # (dy, dx, weight) — error distribution kernels
 Kernel = List[Tuple[int, int, float]]
@@ -33,18 +34,23 @@ def _nearest_color(
     space: str = "lab",
     palette_lab: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """Return the palette color closest to `pixel` (Lab CIE76 or RGB Euclidean)."""
+    """Return the palette color closest to `pixel` (Lab CIE76, CIEDE2000, or RGB)."""
     pix = np.clip(np.asarray(pixel, dtype=np.float64).reshape(1, 3), 0, 255)
     key = str(space).lower().strip()
     if key == "rgb":
         diffs = palette.astype(np.float64) - pix.reshape(3)
         distances = np.einsum("ij,ij->i", diffs, diffs)
         return palette[int(np.argmin(distances))]
-    if key != "lab":
-        raise ValueError(f"Unknown colorspace '{space}'. Use 'rgb' or 'lab'.")
+    if key not in ("lab", "ciede2000"):
+        raise ValueError(
+            f"Unknown colorspace '{space}'. Use 'rgb', 'lab', or 'ciede2000'."
+        )
     if palette_lab is None:
         palette_lab = _palette_lab(palette)
     pix_lab = srgb_to_lab(pix)
+    if key == "ciede2000":
+        distances = ciede2000(pix_lab, palette_lab).reshape(-1)
+        return palette[int(np.argmin(distances))]
     diffs = palette_lab - pix_lab
     distances = np.einsum("ij,ij->i", diffs, diffs)
     return palette[int(np.argmin(distances))]
@@ -76,7 +82,11 @@ def _error_diffuse(
     img = image.astype(np.float32).copy()
     h, w, _ = img.shape
     pal = np.asarray(palette, dtype=np.float32)
-    pal_lab = _palette_lab(pal) if str(space).lower().strip() == "lab" else None
+    pal_lab = (
+        _palette_lab(pal)
+        if str(space).lower().strip() in ("lab", "ciede2000")
+        else None
+    )
 
     for y in range(h):
         reverse = bool(serpentine) and (y % 2 == 1)
@@ -133,7 +143,11 @@ def atkinson(
     img = image.astype(np.float32).copy()
     h, w, _ = img.shape
     pal = np.asarray(palette, dtype=np.float32)
-    pal_lab = _palette_lab(pal) if str(space).lower().strip() == "lab" else None
+    pal_lab = (
+        _palette_lab(pal)
+        if str(space).lower().strip() in ("lab", "ciede2000")
+        else None
+    )
     offsets = [(0, 1), (0, 2), (1, -1), (1, 0), (1, 1), (2, 0)]
 
     for y in range(h):
@@ -232,6 +246,53 @@ def sierra(
     return _error_diffuse(image, palette, kernel, serpentine=serpentine, space=space)
 
 
+def sierra3(
+    image: np.ndarray,
+    palette: np.ndarray,
+    space: str = "lab",
+    serpentine: bool = True,
+) -> np.ndarray:
+    """
+    Sierra-3 (three-row) error diffusion.
+
+    Classic Sierra kernel (div 32): 5, 3 on the current row; 2, 4, 5, 4, 2
+    on the next; 2, 3, 2 on the row after.
+    """
+    kernel: Kernel = [
+        (0, 1, 5 / 32),
+        (0, 2, 3 / 32),
+        (1, -2, 2 / 32),
+        (1, -1, 4 / 32),
+        (1, 0, 5 / 32),
+        (1, 1, 4 / 32),
+        (1, 2, 2 / 32),
+        (2, -1, 2 / 32),
+        (2, 0, 3 / 32),
+        (2, 1, 2 / 32),
+    ]
+    return _error_diffuse(image, palette, kernel, serpentine=serpentine, space=space)
+
+
+def sierra_lite(
+    image: np.ndarray,
+    palette: np.ndarray,
+    space: str = "lab",
+    serpentine: bool = True,
+) -> np.ndarray:
+    """
+    Sierra Filter Lite (Sierra-2-4A) error diffusion.
+
+    Three-element kernel (div 4): ``(0, 1, 2/4)``, ``(1, -1, 1/4)``,
+    ``(1, 0, 1/4)``.
+    """
+    kernel: Kernel = [
+        (0, 1, 2 / 4),
+        (1, -1, 1 / 4),
+        (1, 0, 1 / 4),
+    ]
+    return _error_diffuse(image, palette, kernel, serpentine=serpentine, space=space)
+
+
 def jarvis_judice_ninke(
     image: np.ndarray,
     palette: np.ndarray,
@@ -319,6 +380,9 @@ DITHER_ALGORITHMS: dict[str, Callable[..., np.ndarray]] = {
     "stucki": stucki,
     "burkes": burkes,
     "sierra": sierra,
+    "sierra3": sierra3,
+    "sierra-lite": sierra_lite,
+    "sierra_lite": sierra_lite,
     "jjn": jarvis_judice_ninke,
 }
 

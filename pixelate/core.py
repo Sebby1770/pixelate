@@ -107,18 +107,39 @@ def collect_working_colors(
     return tuple(seen)
 
 
-def _resize_keep_aspect(img: Image.Image, max_dim: int) -> Image.Image:
-    """Downscale so the longest side equals `max_dim`, preserving aspect."""
+_DOWNSCALE_FILTERS = {
+    "box": Image.BOX,
+    "lanczos": Image.LANCZOS,
+    "nearest": Image.NEAREST,
+}
+
+
+def _resize_keep_aspect(
+    img: Image.Image,
+    max_dim: int,
+    filter: str = "box",
+) -> Image.Image:
+    """Downscale so the longest side equals `max_dim`, preserving aspect.
+
+    *filter* is ``box`` (area average, default — chunky / authentic),
+    ``lanczos`` (smooth, blurs before quantize), or ``nearest``.
+    """
     w, h = img.size
     if max(w, h) <= max_dim:
         return img
+    key = str(filter).lower().strip()
+    resampling = _DOWNSCALE_FILTERS.get(key)
+    if resampling is None:
+        raise ValueError(
+            f"Unknown downscale filter '{filter}'. Use 'box', 'lanczos', or 'nearest'."
+        )
     if w >= h:
         new_w = max_dim
         new_h = max(1, round(h * (max_dim / w)))
     else:
         new_h = max_dim
         new_w = max(1, round(w * (max_dim / h)))
-    return img.resize((new_w, new_h), Image.LANCZOS)
+    return img.resize((new_w, new_h), resampling)
 
 
 def _adjust_saturation(img: Image.Image, factor: float) -> Image.Image:
@@ -203,13 +224,17 @@ def resolve_palette(
 # Palette extraction (k-means / median-cut) — numpy only, no sklearn
 # ---------------------------------------------------------------------------
 
-def _unique_sample_pixels(arr: np.ndarray, max_samples: int = 10000) -> np.ndarray:
+def _unique_sample_pixels(
+    arr: np.ndarray,
+    max_samples: int = 10000,
+    seed: int = 42,
+) -> np.ndarray:
     """Flatten HxWx3 image and optionally subsample for clustering speed."""
     flat = arr.reshape(-1, 3).astype(np.float64)
     n = flat.shape[0]
     if n <= max_samples:
         return flat
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(int(seed))
     idx = rng.choice(n, size=max_samples, replace=False)
     return flat[idx]
 
@@ -355,7 +380,9 @@ def extract_palette(
     max_samples :
         Subsample large images for speed.
     seed :
-        RNG seed for k-means++ (default ``0`` when *None*). Ignored for median-cut.
+        RNG seed for pixel subsample and k-means++ (k-means default ``0``
+        when *None*; subsample default ``42`` when *None*). Ignored for
+        median-cut clustering (subsample still uses *seed* when set).
 
     Returns
     -------
@@ -370,12 +397,14 @@ def extract_palette(
     else:
         pil = img.convert("RGB")
 
-    # Downsample huge images first for speed / stability
+    # Downsample huge images first for speed / stability (Lanczos: clustering
+    # preview only — not the pixelation downscale).
     if max(pil.size) > 256:
-        pil = _resize_keep_aspect(pil, 256)
+        pil = _resize_keep_aspect(pil, 256, filter="lanczos")
 
     arr = np.array(pil, dtype=np.uint8)
-    pixels = _unique_sample_pixels(arr, max_samples=max_samples)
+    sample_seed = 42 if seed is None else int(seed)
+    pixels = _unique_sample_pixels(arr, max_samples=max_samples, seed=sample_seed)
 
     # Collapse near-duplicates before clustering when few unique colors
     # (use full unique if small)
@@ -501,7 +530,7 @@ def compare_palettes(
         Background fill color.
     **kwargs :
         Extra kwargs forwarded to :func:`pixelate_image` (``colorspace``,
-        ``serpentine``, CRT flags, …).
+        ``downscale``, ``serpentine``, CRT flags, …).
 
     Returns
     -------
@@ -603,6 +632,8 @@ def pixelate_image(
     posterize: Optional[int] = None,
     bayer_size: int = 4,
     seed: Optional[int] = None,
+    downscale: str = "box",
+    distance: Optional[str] = None,
 ) -> Image.Image:
     """
     Convert an image into retro pixel art.
@@ -619,7 +650,8 @@ def pixelate_image(
         Target resolution of the longest side, in "pixels". Lower = chunkier.
     dither : str
         Dithering algorithm: ``none``, ``floyd``, ``atkinson``, ``bayer``,
-        ``stucki``, ``burkes``, ``sierra``, ``jjn``.
+        ``stucki``, ``burkes``, ``sierra`` (Sierra-2), ``sierra3``,
+        ``sierra-lite`` / ``sierra_lite``, ``jjn``.
     upscale : int
         How many output pixels per logical pixel. ``4`` is a good default.
     saturation : float
@@ -636,8 +668,13 @@ def pixelate_image(
     extract_method : str
         Auto-palette method: ``"kmeans"`` (Lab k-means++) or ``"median-cut"``.
     seed : int, optional
-        RNG seed for auto-palette k-means (default ``0``). Ignored unless
-        *palette* is ``"auto"``.
+        RNG seed for auto-palette pixel subsample and k-means (k-means
+        default ``0``). Ignored unless *palette* is ``"auto"``.
+    downscale : str
+        Downscale filter: ``"box"`` (default, authentic area average),
+        ``"lanczos"``, or ``"nearest"``.
+    distance : str, optional
+        Alias for *colorspace*. If set, overrides *colorspace*.
     scale : int
         Extra integer nearest-neighbor upscale applied after the main
         pipeline (default 1 = none). Use for chunky display pixels.
@@ -648,7 +685,8 @@ def pixelate_image(
     contrast : float
         Contrast multiplier (1.0 = unchanged).
     colorspace : str
-        Palette matching space: ``"lab"`` (CIE76, default) or ``"rgb"``.
+        Palette matching space: ``"lab"`` (CIE76, default), ``"rgb"``,
+        or ``"ciede2000"``.
     serpentine : bool
         Serpentine error diffusion for floyd/stucki/burkes/sierra/jjn
         (and Atkinson). Default True.
@@ -668,9 +706,11 @@ def pixelate_image(
         is stored on ``result.info["pixelate_palette"]``. Mode is RGBA when
         the source had transparency.
     """
-    space = str(colorspace).lower().strip()
-    if space not in ("lab", "rgb"):
-        raise ValueError(f"Unknown colorspace '{colorspace}'. Use 'lab' or 'rgb'.")
+    space = str(distance if distance is not None else colorspace).lower().strip()
+    if space not in ("lab", "rgb", "ciede2000"):
+        raise ValueError(
+            f"Unknown colorspace '{space}'. Use 'lab', 'rgb', or 'ciede2000'."
+        )
 
     # --- Load -----------------------------------------------------------
     if isinstance(src, (str, Path)):
@@ -695,7 +735,7 @@ def pixelate_image(
     img = _adjust_saturation(img, saturation)
     if edges:
         img = _apply_edges(img)
-    img = _resize_keep_aspect(img, pixel_size)
+    img = _resize_keep_aspect(img, pixel_size, filter=downscale)
     if posterize is not None:
         img = _posterize_image(img, posterize)
 

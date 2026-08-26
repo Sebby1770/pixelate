@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from pixelate.colorspace import lab_to_srgb, nearest_palette_indices, srgb_to_lab
+from pixelate.colorspace import ciede2000, lab_to_srgb, nearest_palette_indices, srgb_to_lab
 
 
 def test_srgb_to_lab_gray_is_achromatic():
@@ -76,6 +76,60 @@ def test_nearest_lab_can_differ_from_rgb_on_reddish_pixel():
 def test_nearest_exact_match():
     pixel = np.array([[10, 20, 30]], dtype=np.uint8)
     palette = np.array([[0, 0, 0], [10, 20, 30], [255, 255, 255]], dtype=np.uint8)
-    for space in ("rgb", "lab"):
+    for space in ("rgb", "lab", "ciede2000"):
         idx = nearest_palette_indices(pixel, palette, space=space)
         assert int(idx[0]) == 1
+
+
+def test_ciede2000_exported():
+    from pixelate import ciede2000 as exported
+
+    assert exported is ciede2000
+
+
+def test_ciede2000_identical_is_zero():
+    lab = np.array([[50.0, 2.5, -1.0]], dtype=np.float64)
+    d = ciede2000(lab, lab)
+    assert d.shape == (1, 1)
+    assert float(d[0, 0]) < 1e-9
+
+
+def test_ciede2000_sharma_pair():
+    """Sharma et al. 2005 dataset, pair 1."""
+    lab1 = np.array([50.0000, 2.6772, -79.7751], dtype=np.float64)
+    lab2 = np.array([50.0000, 0.0000, -82.7485], dtype=np.float64)
+    d = float(ciede2000(lab1, lab2))
+    assert abs(d - 2.0425) < 0.02
+
+
+def test_ciede2000_nx3_vs_px3_shape():
+    a = np.array([[50.0, 10.0, 0.0], [40.0, -5.0, 8.0]], dtype=np.float64)
+    b = np.array([[50.0, 0.0, 0.0], [60.0, 20.0, -10.0], [30.0, 0.0, 20.0]], dtype=np.float64)
+    d = ciede2000(a, b)
+    assert d.shape == (2, 3)
+    assert np.all(d >= 0.0)
+
+
+def test_ciede2000_hue_vs_same_euclidean():
+    """Same CIE76 ΔE from gray; CIEDE2000 may differ with hue. Optional."""
+    gray = np.array([50.0, 0.0, 0.0], dtype=np.float64)
+    red = np.array([50.0, 30.0, 0.0], dtype=np.float64)
+    yellow = np.array([50.0, 0.0, 30.0], dtype=np.float64)
+    d76_r = float(np.linalg.norm(red - gray))
+    d76_y = float(np.linalg.norm(yellow - gray))
+    assert abs(d76_r - d76_y) < 1e-9
+    d00_r = float(ciede2000(gray, red))
+    d00_y = float(ciede2000(gray, yellow))
+    # Not required to differ; just a finite positive distance.
+    assert d00_r > 0.0 and d00_y > 0.0
+
+
+def test_nearest_ciede2000_index_in_range():
+    pixels = np.array([[10, 20, 30], [200, 10, 10], [0, 0, 0]], dtype=np.uint8)
+    palette = np.array(
+        [[0, 0, 0], [255, 0, 0], [0, 255, 0], [255, 255, 255]],
+        dtype=np.uint8,
+    )
+    idx = nearest_palette_indices(pixels, palette, space="ciede2000")
+    assert idx.shape == (3,)
+    assert np.all(idx >= 0) and np.all(idx < len(palette))

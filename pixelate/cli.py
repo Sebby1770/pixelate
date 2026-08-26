@@ -70,7 +70,7 @@ def _common_convert_options(fn):
             "--seed",
             type=int,
             default=None,
-            help="RNG seed for auto-palette k-means (default 0). Only used with --palette auto.",
+            help="RNG seed for auto-palette k-means and pixel subsample. Only used with --palette auto.",
         ),
         click.option(
             "-s", "--pixel-size",
@@ -78,6 +78,13 @@ def _common_convert_options(fn):
             default=96,
             show_default=True,
             help='Resolution of longest side, in "logical" pixels.',
+        ),
+        click.option(
+            "--downscale",
+            type=click.Choice(["box", "lanczos", "nearest"], case_sensitive=False),
+            default="box",
+            show_default=True,
+            help="Downscale filter (box is authentic/chunky; lanczos blurs; nearest is point-sample).",
         ),
         click.option(
             "-d", "--dither",
@@ -138,10 +145,12 @@ def _common_convert_options(fn):
         ),
         click.option(
             "--colorspace",
-            type=click.Choice(["lab", "rgb"], case_sensitive=False),
+            "--distance",
+            "colorspace",
+            type=click.Choice(["lab", "rgb", "ciede2000"], case_sensitive=False),
             default="lab",
             show_default=True,
-            help="Palette matching space (CIE76 Lab or Euclidean RGB).",
+            help="Palette matching: CIE76 Lab, Euclidean RGB, or CIEDE2000.",
         ),
         click.option(
             "--serpentine/--no-serpentine",
@@ -236,6 +245,7 @@ def _convert_kwargs(
     posterize: Optional[int] = None,
     bayer_size: int | str = 4,
     seed: Optional[int] = None,
+    downscale: str = "box",
 ) -> dict:
     return dict(
         palette=palette,
@@ -258,7 +268,45 @@ def _convert_kwargs(
         posterize=posterize,
         bayer_size=int(bayer_size),
         seed=seed,
+        downscale=downscale,
     )
+
+
+def _picklable_convert_kwargs(kwargs: dict) -> dict:
+    """Copy convert kwargs with Path values as strings (spawn-safe)."""
+    out = dict(kwargs)
+    pf = out.get("palette_file")
+    if pf is not None:
+        out["palette_file"] = str(pf)
+    return out
+
+
+def _batch_convert_one(payload: dict) -> str:
+    """Convert a single batch image. Module-level so ProcessPoolExecutor can pickle it."""
+    src = Path(payload["src"])
+    input_dir = Path(payload["input_dir"])
+    output_dir = Path(payload["output_dir"])
+    kwargs = dict(payload["kwargs"])
+    pf = kwargs.get("palette_file")
+    if pf is not None:
+        kwargs["palette_file"] = Path(pf)
+
+    rel = src.relative_to(input_dir) if src.is_relative_to(input_dir) else Path(src.name)
+    out_name = Path(rel).stem + "_pixel"
+    if is_animated(src):
+        dest = output_dir / Path(rel).with_name(out_name + ".gif")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        pixelate_animation(src, output=dest, **kwargs)
+    else:
+        dest = output_dir / Path(rel).with_name(out_name + ".png")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        result = pixelate_image(src, **kwargs)
+        save_image(
+            result,
+            dest,
+            palette=result.info.get(PALETTE_INFO_KEY),
+        )
+    return str(dest)
 
 
 @click.group(invoke_without_command=True)
@@ -289,6 +337,7 @@ def convert_cmd(
     extract_method: str,
     seed: int | None,
     pixel_size: int,
+    downscale: str,
     dither: str,
     upscale: int,
     scale: int,
@@ -335,6 +384,7 @@ def convert_cmd(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
         colorspace, serpentine, phosphor, posterize, bayer_size, seed,
+        downscale=downscale,
     )
 
     info_panel(
@@ -344,6 +394,7 @@ def convert_cmd(
             f"[cyan]Palette:[/cyan]   [yellow]{_palette_label(palette, palette_file, colors)}[/yellow]\n"
             f"[cyan]Resolution:[/cyan] {pixel_size}px × {upscale}× upscale"
             f"{f' × {scale}× scale' if scale > 1 else ''}\n"
+            f"[cyan]Downscale:[/cyan] {downscale}\n"
             f"[cyan]Dither:[/cyan]    {dither}"
             f"{'' if serpentine else ' (no serpentine)'}\n"
             f"[cyan]Match:[/cyan]     {colorspace}\n"
@@ -410,7 +461,7 @@ def convert_cmd(
     type=click.IntRange(1, 32),
     default=1,
     show_default=True,
-    help="Parallel workers (ThreadPoolExecutor when greater than 1).",
+    help="Parallel workers (ProcessPoolExecutor when greater than 1; threads on spawn failure).",
 )
 @_common_convert_options
 def batch_cmd(
@@ -424,6 +475,7 @@ def batch_cmd(
     extract_method: str,
     seed: int | None,
     pixel_size: int,
+    downscale: str,
     dither: str,
     upscale: int,
     scale: int,
@@ -453,6 +505,7 @@ def batch_cmd(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
         colorspace, serpentine, phosphor, posterize, bayer_size, seed,
+        downscale=downscale,
     )
 
     info_panel(
@@ -469,23 +522,16 @@ def batch_cmd(
 
     ok = 0
     errors: list[str] = []
-
-    def _convert_one(src: Path) -> None:
-        rel = src.relative_to(input_dir) if src.is_relative_to(input_dir) else src.name
-        out_name = Path(rel).stem + "_pixel"
-        if is_animated(src):
-            dest = output_dir / Path(rel).with_name(out_name + ".gif")
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            pixelate_animation(src, output=dest, **kwargs)
-        else:
-            dest = output_dir / Path(rel).with_name(out_name + ".png")
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            result = pixelate_image(src, **kwargs)
-            save_image(
-                result,
-                dest,
-                palette=result.info.get(PALETTE_INFO_KEY),
-            )
+    packed_kwargs = _picklable_convert_kwargs(kwargs)
+    payloads = [
+        {
+            "src": str(src),
+            "input_dir": str(input_dir),
+            "output_dir": str(output_dir),
+            "kwargs": packed_kwargs,
+        }
+        for src in images
+    ]
 
     with Progress(
         SpinnerColumn(style="green"),
@@ -497,26 +543,40 @@ def batch_cmd(
     ) as progress:
         task = progress.add_task("[green]Converting...", total=len(images))
         if jobs <= 1:
-            for src in images:
+            for payload in payloads:
                 try:
-                    _convert_one(src)
+                    _batch_convert_one(payload)
                     ok += 1
                 except Exception as exc:  # noqa: BLE001 — report and continue batch
-                    errors.append(f"{src.name}: {exc}")
+                    errors.append(f"{Path(payload['src']).name}: {exc}")
                 progress.advance(task)
         else:
-            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
-            with ThreadPoolExecutor(max_workers=jobs) as pool:
-                futures = {pool.submit(_convert_one, src): src for src in images}
-                for fut in as_completed(futures):
-                    src = futures[fut]
-                    try:
-                        fut.result()
-                        ok += 1
-                    except Exception as exc:  # noqa: BLE001 — report and continue batch
-                        errors.append(f"{src.name}: {exc}")
-                    progress.advance(task)
+            def _drain(executor) -> tuple[int, list[str]]:
+                n_ok = 0
+                n_err: list[str] = []
+                with executor:
+                    futures = {
+                        executor.submit(_batch_convert_one, p): Path(p["src"]).name
+                        for p in payloads
+                    }
+                    for fut in as_completed(futures):
+                        name = futures[fut]
+                        try:
+                            fut.result()
+                            n_ok += 1
+                        except Exception as exc:  # noqa: BLE001 — report and continue batch
+                            n_err.append(f"{name}: {exc}")
+                        progress.advance(task)
+                return n_ok, n_err
+
+            try:
+                n_ok, n_err = _drain(ProcessPoolExecutor(max_workers=jobs))
+            except Exception:
+                n_ok, n_err = _drain(ThreadPoolExecutor(max_workers=jobs))
+            ok += n_ok
+            errors.extend(n_err)
 
     console.print(f"[bold green]✓[/bold green] Converted {ok}/{len(images)} images → [cyan]{output_dir}[/cyan]")
     for err in errors:
@@ -569,6 +629,7 @@ def sheet_cmd(
     extract_method: str,
     seed: int | None,
     pixel_size: int,
+    downscale: str,
     dither: str,
     upscale: int,
     scale: int,
@@ -602,6 +663,7 @@ def sheet_cmd(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
         colorspace, serpentine, phosphor, posterize, bayer_size, seed,
+        downscale=downscale,
     )
 
     info_panel(
@@ -685,10 +747,12 @@ def sheet_cmd(
 @click.option("--no-label", is_flag=True, help="Hide palette name labels.")
 @click.option(
     "--colorspace",
-    type=click.Choice(["lab", "rgb"], case_sensitive=False),
+    "--distance",
+    "colorspace",
+    type=click.Choice(["lab", "rgb", "ciede2000"], case_sensitive=False),
     default="lab",
     show_default=True,
-    help="Palette matching space (CIE76 Lab or Euclidean RGB).",
+    help="Palette matching: CIE76 Lab, Euclidean RGB, or CIEDE2000.",
 )
 @click.option(
     "--serpentine/--no-serpentine",

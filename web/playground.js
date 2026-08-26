@@ -51,6 +51,14 @@ const KERNELS = {
     [1, -2, 3 / 48], [1, -1, 5 / 48], [1, 0, 7 / 48], [1, 1, 5 / 48], [1, 2, 3 / 48],
     [2, -2, 1 / 48], [2, -1, 3 / 48], [2, 0, 5 / 48], [2, 1, 3 / 48], [2, 2, 1 / 48],
   ],
+  sierra3: [
+    [0, 1, 5 / 32], [0, 2, 3 / 32],
+    [1, -2, 2 / 32], [1, -1, 4 / 32], [1, 0, 5 / 32], [1, 1, 4 / 32], [1, 2, 2 / 32],
+    [2, -1, 2 / 32], [2, 0, 3 / 32], [2, 1, 2 / 32],
+  ],
+  sierraLite: [
+    [0, 1, 2 / 4], [1, -1, 1 / 4], [1, 0, 1 / 4],
+  ],
 };
 
 const BAYER4 = [
@@ -65,6 +73,7 @@ const els = {
   palette: document.getElementById("palette"),
   paletteB: document.getElementById("paletteB"),
   dither: document.getElementById("dither"),
+  downscale: document.getElementById("downscale"),
   pixelSize: document.getElementById("pixelSize"),
   pixelSizeVal: document.getElementById("pixelSizeVal"),
   upscale: document.getElementById("upscale"),
@@ -299,7 +308,10 @@ function dither(imageData, name, palette, serpentine) {
   else if (name === "bayer") bayer(data, width, height, palette, labPal);
   else if (name === "atkinson") atkinson(data, width, height, palette, labPal, serp);
   else if (name === "jjn") errorDiffuse(data, width, height, palette, labPal, KERNELS.jjn, serp);
-  else errorDiffuse(data, width, height, palette, labPal, KERNELS.floyd, serp);
+  else if (name === "sierra3") errorDiffuse(data, width, height, palette, labPal, KERNELS.sierra3, serp);
+  else if (name === "sierra-lite" || name === "sierra_lite") {
+    errorDiffuse(data, width, height, palette, labPal, KERNELS.sierraLite, serp);
+  } else errorDiffuse(data, width, height, palette, labPal, KERNELS.floyd, serp);
 }
 
 function fitSize(w, h, maxDim) {
@@ -319,17 +331,76 @@ function paintSource(img) {
   ctx.drawImage(img, 0, 0, s.w, s.h);
 }
 
+function boxDownscale(img, dw, dh) {
+  const sw = img.width;
+  const sh = img.height;
+  const src = document.createElement("canvas");
+  src.width = sw;
+  src.height = sh;
+  const sctx = src.getContext("2d", { willReadFrequently: true });
+  sctx.drawImage(img, 0, 0);
+  const srcData = sctx.getImageData(0, 0, sw, sh).data;
+  const out = sctx.createImageData(dw, dh);
+  const dst = out.data;
+  for (let y = 0; y < dh; y++) {
+    const y0 = Math.floor((y * sh) / dh);
+    const y1 = Math.max(y0 + 1, Math.floor(((y + 1) * sh) / dh));
+    for (let x = 0; x < dw; x++) {
+      const x0 = Math.floor((x * sw) / dw);
+      const x1 = Math.max(x0 + 1, Math.floor(((x + 1) * sw) / dw));
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      let n = 0;
+      for (let yy = y0; yy < y1; yy++) {
+        let i = (yy * sw + x0) * 4;
+        for (let xx = x0; xx < x1; xx++) {
+          r += srcData[i];
+          g += srcData[i + 1];
+          b += srcData[i + 2];
+          a += srcData[i + 3];
+          n++;
+          i += 4;
+        }
+      }
+      const j = (y * dw + x) * 4;
+      dst[j] = r / n;
+      dst[j + 1] = g / n;
+      dst[j + 2] = b / n;
+      dst[j + 3] = a / n;
+    }
+  }
+  return out;
+}
+
+function downscaleTo(img, dw, dh, mode) {
+  const small = document.createElement("canvas");
+  small.width = dw;
+  small.height = dh;
+  const sctx = small.getContext("2d", { willReadFrequently: true });
+  const filter = mode || "box";
+  if (filter === "nearest") {
+    sctx.imageSmoothingEnabled = false;
+    sctx.drawImage(img, 0, 0, dw, dh);
+  } else if (filter === "lanczos") {
+    sctx.imageSmoothingEnabled = true;
+    if ("imageSmoothingQuality" in sctx) sctx.imageSmoothingQuality = "high";
+    sctx.drawImage(img, 0, 0, dw, dh);
+  } else {
+    sctx.putImageData(boxDownscale(img, dw, dh), 0, 0);
+  }
+  return small;
+}
+
 function pixelateBuffer(palette) {
   const pixelSize = Number(els.pixelSize.value);
   const ditherName = els.dither.value;
   const serpentine = !els.serpentine || els.serpentine.checked;
   const dim = fitSize(sourceImage.width, sourceImage.height, pixelSize);
-  const small = document.createElement("canvas");
-  small.width = dim.w;
-  small.height = dim.h;
+  const filter = els.downscale ? els.downscale.value : "box";
+  const small = downscaleTo(sourceImage, dim.w, dim.h, filter);
   const sctx = small.getContext("2d", { willReadFrequently: true });
-  sctx.imageSmoothingEnabled = true;
-  sctx.drawImage(sourceImage, 0, 0, dim.w, dim.h);
   const imageData = sctx.getImageData(0, 0, dim.w, dim.h);
   const levels = posterizeLevels();
   if (levels >= 2) posterizeData(imageData.data, levels);
@@ -524,7 +595,7 @@ els.file.addEventListener("change", (e) => {
   loadImageFile(file);
 });
 
-["palette", "paletteB", "dither", "pixelSize", "upscale", "crt", "scanlines", "serpentine", "phosphor", "posterize"].forEach((id) => {
+["palette", "paletteB", "dither", "downscale", "pixelSize", "upscale", "crt", "scanlines", "serpentine", "phosphor", "posterize"].forEach((id) => {
   if (!els[id]) return;
   els[id].addEventListener("input", () => {
     if (id === "palette") paintSwatches(els.palette.value);

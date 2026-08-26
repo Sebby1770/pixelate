@@ -14,6 +14,8 @@ from pixelate.dithering import (
     ordered_bayer,
     quantize_no_dither,
     sierra,
+    sierra3,
+    sierra_lite,
     stucki,
 )
 
@@ -89,10 +91,38 @@ def test_get_dither_unknown_raises():
 
 def test_all_algorithms_registered():
     for name in (
-        "none", "floyd", "atkinson", "bayer", "stucki", "burkes", "sierra", "jjn",
+        "none", "floyd", "atkinson", "bayer", "stucki", "burkes", "sierra",
+        "sierra3", "sierra-lite", "sierra_lite", "jjn",
     ):
         assert name in DITHER_ALGORITHMS
         assert callable(get_dither(name))
+
+
+def test_sierra3_uses_only_palette_colors(gradient, palette):
+    out = sierra3(gradient.copy(), palette)
+    unique = np.unique(out.reshape(-1, 3), axis=0)
+    assert len(unique) <= 2
+    _assert_only_palette(out, palette)
+
+
+def test_sierra_lite_uses_only_palette_colors(gradient, palette):
+    out = sierra_lite(gradient.copy(), palette)
+    unique = np.unique(out.reshape(-1, 3), axis=0)
+    assert len(unique) <= 2
+    _assert_only_palette(out, palette)
+
+
+def test_dither_image_sierra3_and_lite_subset(gradient, palette):
+    for name in ("sierra3", "sierra-lite", "sierra_lite"):
+        out = dither_image(gradient.copy(), palette, name, space="lab")
+        _assert_only_palette(out, palette)
+        assert out.dtype == np.uint8
+
+
+def test_dither_none_ciede2000_subset(gradient, palette):
+    out = dither_image(gradient.copy(), palette, "none", space="ciede2000")
+    _assert_only_palette(out, palette)
+    assert out.dtype == np.uint8
 
 
 def test_jjn_uses_only_palette_colors(gradient, palette):

@@ -1,10 +1,10 @@
 """PIXELATE — retro pixel art converter."""
 
-__version__ = "2.4.0"
+__version__ = "2.5.0"
 __author__ = "Seb"
 
 from pixelate.animation import is_animated, pixelate_animation
-from pixelate.colorspace import lab_to_srgb, nearest_palette_indices, srgb_to_lab
+from pixelate.colorspace import ciede2000, lab_to_srgb, nearest_palette_indices, srgb_to_lab
 from pixelate.core import (
     color_usage_report,
     compare_palettes,
@@ -31,6 +31,7 @@ __all__ = [
     "save_image",
     "srgb_to_lab",
     "lab_to_srgb",
+    "ciede2000",
     "nearest_palette_indices",
     "dither_image",
     "apply_phosphor",
