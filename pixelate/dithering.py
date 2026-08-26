@@ -288,7 +288,7 @@ def ordered_bayer(
             [3, 11, 1, 9],
             [15, 7, 13, 5],
         ]) / 16.0
-    else:
+    elif matrix_size == 8:
         bayer = np.array([
             [0, 32, 8, 40, 2, 34, 10, 42],
             [48, 16, 56, 24, 50, 18, 58, 26],
@@ -299,6 +299,8 @@ def ordered_bayer(
             [15, 47, 7, 39, 13, 45, 5, 37],
             [63, 31, 55, 23, 61, 29, 53, 21],
         ]) / 64.0
+    else:
+        raise ValueError("matrix_size must be 2, 4, or 8")
 
     h, w, _ = image.shape
     bh, bw = bayer.shape
@@ -336,13 +338,25 @@ def dither_image(
     name: str,
     space: str = "lab",
     serpentine: bool = True,
+    bayer_size: int = 4,
 ) -> np.ndarray:
     """
     Apply a named dither with matching space and serpentine scanning.
 
     All pipeline callers should use this rather than invoking kernel
     functions directly, so Lab matching and serpentine stay consistent.
+
+    *bayer_size* is used only when *name* is ``"bayer"`` (2, 4, or 8).
     """
     fn = get_dither(name)
-    out = fn(image, palette, space=space, serpentine=serpentine)
+    key = name.lower().strip()
+    if key == "bayer":
+        size = int(bayer_size)
+        if size not in (2, 4, 8):
+            raise ValueError("bayer_size must be 2, 4, or 8")
+        out = fn(
+            image, palette, matrix_size=size, space=space, serpentine=serpentine
+        )
+    else:
+        out = fn(image, palette, space=space, serpentine=serpentine)
     return np.clip(out, 0, 255).astype(np.uint8)

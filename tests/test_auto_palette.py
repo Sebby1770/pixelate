@@ -111,3 +111,16 @@ def test_builtin_palette_still_works():
     out = pixelate_image(src, palette="gameboy", pixel_size=16, upscale=1, dither="none")
     unique = {tuple(c) for c in np.array(out).reshape(-1, 3)}
     assert unique.issubset(set(get_palette("gameboy")))
+
+
+def test_kmeans_plus_plus_deterministic():
+    rng = np.random.default_rng(1)
+    arr = rng.integers(0, 256, size=(48, 48, 3), dtype=np.uint8)
+    src = Image.fromarray(arr, mode="RGB")
+    a = extract_palette(src, n=8, method="kmeans")
+    b = extract_palette(src, n=8, method="kmeans")
+    assert a == b
+    assert 1 <= len(a) <= 8
+    for c in a:
+        assert len(c) == 3
+        assert all(0 <= v <= 255 for v in c)

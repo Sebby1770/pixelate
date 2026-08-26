@@ -100,6 +100,9 @@ def pixelate_animation(
     contrast: float = 1.0,
     colorspace: str = "lab",
     serpentine: bool = True,
+    phosphor: bool = False,
+    posterize: Optional[int] = None,
+    bayer_size: int = 4,
 ) -> Union[Image.Image, Tuple[FrameList, DurationList]]:
     """
     Pixelate every frame of an animated (or still) image.
@@ -110,7 +113,8 @@ def pixelate_animation(
         Path or PIL Image (animated GIF/WebP or still).
     palette, pixel_size, dither, upscale, saturation, crt, scanlines, palette_file :
         Forwarded to :func:`pixelate.core.pixelate_image` for each frame.
-    colors, extract_method, scale, edges, invert, contrast, colorspace, serpentine :
+    colors, extract_method, scale, edges, invert, contrast, colorspace, serpentine,
+    phosphor, posterize, bayer_size :
         Additional pipeline options forwarded per frame.
     output :
         If given, save an animated GIF to this path and return the first
@@ -158,6 +162,9 @@ def pixelate_animation(
             contrast=contrast,
             colorspace=colorspace,
             serpentine=serpentine,
+            phosphor=phosphor,
+            posterize=posterize,
+            bayer_size=bayer_size,
         )
         out_frames.append(result)
 

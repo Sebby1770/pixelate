@@ -15,7 +15,7 @@
   <div class="app">
     <header class="mast">
       <pre class="logo" aria-label="PIXELATE">PIXELATE</pre>
-      <p class="tag">web lab · v2.2.0 · file stays in the browser · lab matching</p>
+      <p class="tag">web lab · v2.3.0 · drop zone · file stays in the browser · lab matching</p>
     </header>
 
     <section class="rack">
@@ -27,6 +27,11 @@
       <label class="field">
         palette
         <select id="palette"></select>
+      </label>
+
+      <label class="field">
+        palette b
+        <select id="paletteB"></select>
       </label>
 
       <label class="field">
@@ -58,7 +63,12 @@
         <input id="scanlines" type="checkbox" checked />
         scanlines
       </label>
+      <label class="tog">
+        <input id="serpentine" type="checkbox" checked />
+        serpentine
+      </label>
 
+      <button id="compare" class="btn" type="button" aria-pressed="false">compare</button>
       <button id="download" class="btn primary" type="button">download png</button>
     </section>
 
@@ -78,7 +88,7 @@
     </section>
 
     <footer class="status">
-      <span id="status">drop a file or use the demo signal</span>
+      <span id="status">drop zone · drop an image onto the lab, or load image · demo signal</span>
       <span class="swatches" id="swatches"></span>
     </footer>
   </div>

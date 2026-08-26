@@ -3,11 +3,11 @@ Core pixel-art conversion pipeline.
 
 The pipeline:
   1. Load image (EXIF-aware), keep alpha aside, convert RGB.
-  2. Optional invert / contrast / edge pre-pass.
+  2. Optional invert / contrast / edge / posterize pre-pass.
   3. Downscale to target resolution (this is the "pixelation").
   4. Quantize to a retro (or auto-extracted) palette, optionally with dithering.
   5. Upscale with nearest-neighbor (so each "pixel" stays crisp).
-  6. Optional CRT effects and extra display scale.
+  6. Optional CRT bloom, phosphor mask, scanlines, then extra display scale.
 """
 
 from __future__ import annotations
@@ -146,6 +146,18 @@ def _apply_edges(img: Image.Image) -> Image.Image:
     return Image.blend(sharpened, edged, alpha=0.35)
 
 
+def _posterize_image(img: Image.Image, n: int) -> Image.Image:
+    """Bit-crush each RGB channel to *n* discrete levels (2–16)."""
+    n = int(n)
+    if n < 2 or n > 16:
+        raise ValueError("posterize must be between 2 and 16")
+    rgb = img.convert("RGB")
+    arr = np.asarray(rgb, dtype=np.float32)
+    q = np.round(arr * (n - 1) / 255.0)
+    out = np.round(q * (255.0 / (n - 1)))
+    return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), mode="RGB")
+
+
 def resolve_palette(
     palette: Union[str, Path, Sequence[RGB]] = "gameboy",
     palette_file: Optional[PathLike] = None,
@@ -202,19 +214,35 @@ def _unique_sample_pixels(arr: np.ndarray, max_samples: int = 10000) -> np.ndarr
     return flat[idx]
 
 
+def _kmeans_plus_plus_init(pixels: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
+    """k-means++ seed: first center random, then P ∝ D² to nearest center."""
+    n_pix = pixels.shape[0]
+    n = max(1, min(n, n_pix))
+    centers = np.empty((n, pixels.shape[1]), dtype=np.float64)
+    centers[0] = pixels[int(rng.integers(0, n_pix))]
+    closest = np.einsum("ij,ij->i", pixels - centers[0], pixels - centers[0])
+    for k in range(1, n):
+        total = float(closest.sum())
+        if total <= 0.0 or not np.isfinite(total):
+            centers[k] = pixels[int(rng.integers(0, n_pix))]
+        else:
+            probs = closest / total
+            probs = probs / probs.sum()
+            centers[k] = pixels[int(rng.choice(n_pix, p=probs))]
+        diff = pixels - centers[k]
+        d2 = np.einsum("ij,ij->i", diff, diff)
+        closest = np.minimum(closest, d2)
+    return centers
+
+
 def _kmeans_palette(pixels: np.ndarray, n: int, max_iter: int = 20) -> Palette:
-    """Simple k-means clustering in RGB space (numpy only)."""
+    """k-means clustering in RGB space with k-means++ init (numpy only)."""
     if pixels.shape[0] == 0:
         raise ValueError("No pixels to cluster")
     n = max(1, min(n, pixels.shape[0]))
 
-    # Init: pick n distinct-ish seeds by spread sampling
     rng = np.random.default_rng(0)
-    if pixels.shape[0] >= n:
-        seeds_idx = rng.choice(pixels.shape[0], size=n, replace=False)
-        centers = pixels[seeds_idx].copy()
-    else:
-        centers = pixels.copy()
+    centers = _kmeans_plus_plus_init(pixels, n, rng)
 
     for _ in range(max_iter):
         # Assign
@@ -315,7 +343,7 @@ def extract_palette(
     n :
         Target number of colors (clamped to unique sample size).
     method :
-        ``"kmeans"`` (default) or ``"median-cut"`` / ``"mediancut"``.
+        ``"kmeans"`` (default, k-means++ init) or ``"median-cut"`` / ``"mediancut"``.
     max_samples :
         Subsample large images for speed.
 
@@ -561,6 +589,9 @@ def pixelate_image(
     contrast: float = 1.0,
     colorspace: str = "lab",
     serpentine: bool = True,
+    phosphor: bool = False,
+    posterize: Optional[int] = None,
+    bayer_size: int = 4,
 ) -> Image.Image:
     """
     Convert an image into retro pixel art.
@@ -583,7 +614,7 @@ def pixelate_image(
     saturation : float
         Saturation multiplier applied before quantization.
     crt : bool
-        Apply a CRT-style glow + curvature effect after upscaling.
+        Apply CRT-style glow + vignette after upscaling (no curvature).
     scanlines : bool
         Overlay horizontal scanlines on the upscaled output.
     palette_file : path, optional
@@ -607,6 +638,14 @@ def pixelate_image(
     serpentine : bool
         Serpentine error diffusion for floyd/stucki/burkes/sierra/jjn
         (and Atkinson). Default True.
+    phosphor : bool
+        Apply an RGB phosphor column mask after CRT, before scanlines.
+    posterize : int, optional
+        If set (2–16), bit-crush each channel to that many levels after
+        the other pre-passes and before palette quantization.
+    bayer_size : int
+        Bayer matrix size ``2``, ``4``, or ``8`` (default 4). Ignored
+        unless *dither* is ``"bayer"``.
 
     Returns
     -------
@@ -643,6 +682,8 @@ def pixelate_image(
     if edges:
         img = _apply_edges(img)
     img = _resize_keep_aspect(img, pixel_size)
+    if posterize is not None:
+        img = _posterize_image(img, posterize)
 
     # --- Palette --------------------------------------------------------
     if palette_file is not None:
@@ -665,6 +706,7 @@ def pixelate_image(
         dither,
         space=space,
         serpentine=serpentine,
+        bayer_size=bayer_size,
     )
 
     out = Image.fromarray(quantized.astype(np.uint8), mode="RGB")
@@ -674,13 +716,15 @@ def pixelate_image(
         new_size = (out.size[0] * upscale, out.size[1] * upscale)
         out = out.resize(new_size, Image.NEAREST)
 
-    # --- Effects --------------------------------------------------------
-    if scanlines or crt:
-        from pixelate.effects import apply_scanlines, apply_crt
-        if scanlines:
-            out = apply_scanlines(out)
+    # --- Effects (CRT bloom first, then phosphor, then scanlines) ------
+    if crt or phosphor or scanlines:
+        from pixelate.effects import apply_crt, apply_phosphor, apply_scanlines
         if crt:
             out = apply_crt(out)
+        if phosphor:
+            out = apply_phosphor(out)
+        if scanlines:
+            out = apply_scanlines(out)
 
     # --- Extra display scale (chunky nearest-neighbor) ------------------
     if scale > 1:

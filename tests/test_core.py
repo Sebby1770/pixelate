@@ -191,3 +191,28 @@ def test_pixelate_new_dithers():
     for dither in ("stucki", "burkes", "sierra", "jjn"):
         out = pixelate_image(src, palette="cga", pixel_size=16, upscale=1, dither=dither)
         assert isinstance(out, Image.Image)
+
+
+def test_posterize_output_subset_of_palette():
+    src = _make_test_image()
+    pal = set(get_palette("gameboy"))
+    out = pixelate_image(
+        src, palette="gameboy", posterize=4, pixel_size=32, upscale=1, dither="none"
+    )
+    unique = {tuple(int(x) for x in c) for c in np.array(out).reshape(-1, 3)}
+    assert unique.issubset(pal)
+
+
+def test_bayer_size_8_subset_of_palette():
+    src = _make_test_image()
+    pal = set(get_palette("cga"))
+    out = pixelate_image(
+        src,
+        palette="cga",
+        dither="bayer",
+        bayer_size=8,
+        pixel_size=16,
+        upscale=1,
+    )
+    unique = {tuple(int(x) for x in c) for c in np.array(out).reshape(-1, 3)}
+    assert unique.issubset(pal)

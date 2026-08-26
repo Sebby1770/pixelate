@@ -120,6 +120,14 @@ def test_dither_image_jjn_subset(gradient, palette):
     assert out.dtype == np.uint8
 
 
+def test_dither_image_bayer_size_8_subset(gradient, palette):
+    out = dither_image(
+        gradient.copy(), palette, "bayer", space="lab", bayer_size=8
+    )
+    _assert_only_palette(out, palette)
+    assert out.dtype == np.uint8
+
+
 @pytest.mark.parametrize("name", ["stucki", "burkes", "sierra"])
 def test_new_dithers_via_get_dither(name, gradient, palette):
     fn = get_dither(name)

@@ -63,6 +63,7 @@ const BAYER4 = [
 const els = {
   file: document.getElementById("file"),
   palette: document.getElementById("palette"),
+  paletteB: document.getElementById("paletteB"),
   dither: document.getElementById("dither"),
   pixelSize: document.getElementById("pixelSize"),
   pixelSizeVal: document.getElementById("pixelSizeVal"),
@@ -70,6 +71,8 @@ const els = {
   upscaleVal: document.getElementById("upscaleVal"),
   crt: document.getElementById("crt"),
   scanlines: document.getElementById("scanlines"),
+  serpentine: document.getElementById("serpentine"),
+  compare: document.getElementById("compare"),
   download: document.getElementById("download"),
   srcCanvas: document.getElementById("srcCanvas"),
   outCanvas: document.getElementById("outCanvas"),
@@ -78,8 +81,11 @@ const els = {
   swatches: document.getElementById("swatches"),
 };
 
+const appEl = document.querySelector(".app");
+
 let sourceImage = null;
 let renderTimer = 0;
+let compareOn = false;
 
 function clamp(v) {
   return v < 0 ? 0 : v > 255 ? 255 : v;
@@ -241,14 +247,15 @@ function bayer(data, w, h, palette, labPal) {
   }
 }
 
-function dither(imageData, name, palette) {
+function dither(imageData, name, palette, serpentine) {
   const { data, width, height } = imageData;
   const labPal = paletteLab(palette);
+  const serp = serpentine !== false;
   if (name === "none") quantize(data, width, height, palette, labPal);
   else if (name === "bayer") bayer(data, width, height, palette, labPal);
-  else if (name === "atkinson") atkinson(data, width, height, palette, labPal, true);
-  else if (name === "jjn") errorDiffuse(data, width, height, palette, labPal, KERNELS.jjn, true);
-  else errorDiffuse(data, width, height, palette, labPal, KERNELS.floyd, true);
+  else if (name === "atkinson") atkinson(data, width, height, palette, labPal, serp);
+  else if (name === "jjn") errorDiffuse(data, width, height, palette, labPal, KERNELS.jjn, serp);
+  else errorDiffuse(data, width, height, palette, labPal, KERNELS.floyd, serp);
 }
 
 function fitSize(w, h, maxDim) {
@@ -268,37 +275,61 @@ function paintSource(img) {
   ctx.drawImage(img, 0, 0, s.w, s.h);
 }
 
-function render() {
-  if (!sourceImage) return;
-  const palette = PALETTES[els.palette.value];
+function pixelateBuffer(palette) {
   const pixelSize = Number(els.pixelSize.value);
-  const upscale = Number(els.upscale.value);
   const ditherName = els.dither.value;
-  const t0 = performance.now();
-
-  const small = document.createElement("canvas");
+  const serpentine = !els.serpentine || els.serpentine.checked;
   const dim = fitSize(sourceImage.width, sourceImage.height, pixelSize);
+  const small = document.createElement("canvas");
   small.width = dim.w;
   small.height = dim.h;
   const sctx = small.getContext("2d", { willReadFrequently: true });
   sctx.imageSmoothingEnabled = true;
   sctx.drawImage(sourceImage, 0, 0, dim.w, dim.h);
   const imageData = sctx.getImageData(0, 0, dim.w, dim.h);
-  dither(imageData, ditherName, palette);
+  dither(imageData, ditherName, palette, serpentine);
   sctx.putImageData(imageData, 0, 0);
+  return { small, dim };
+}
+
+function render() {
+  if (!sourceImage) return;
+  const palette = PALETTES[els.palette.value];
+  const upscale = Number(els.upscale.value);
+  const ditherName = els.dither.value;
+  const t0 = performance.now();
+
+  const a = pixelateBuffer(palette);
+  const dim = a.dim;
 
   const out = els.outCanvas;
   out.width = dim.w * upscale;
   out.height = dim.h * upscale;
   const octx = out.getContext("2d");
   octx.imageSmoothingEnabled = false;
-  octx.drawImage(small, 0, 0, out.width, out.height);
+
+  if (compareOn && els.paletteB) {
+    const bPal = PALETTES[els.paletteB.value] || palette;
+    const b = pixelateBuffer(bPal);
+    const mid = Math.floor(out.width / 2);
+    const srcMid = Math.floor(dim.w / 2);
+    octx.drawImage(a.small, 0, 0, srcMid, dim.h, 0, 0, mid, out.height);
+    octx.drawImage(b.small, srcMid, 0, dim.w - srcMid, dim.h, mid, 0, out.width - mid, out.height);
+    octx.fillStyle = "rgba(60,255,122,0.85)";
+    octx.fillRect(Math.max(0, mid - 1), 0, 2, out.height);
+  } else {
+    octx.drawImage(a.small, 0, 0, out.width, out.height);
+  }
 
   els.outFrame.classList.toggle("crt-on", els.crt.checked);
   els.outFrame.classList.toggle("scan-on", els.scanlines.checked);
 
   const ms = (performance.now() - t0).toFixed(0);
-  els.status.textContent = `${dim.w}×${dim.h} → ${out.width}×${out.height}  ·  ${ditherName}  ·  ${ms}ms`;
+  const cmp = compareOn
+    ? `  ·  ${els.palette.value}|${els.paletteB.value}`
+    : "";
+  els.status.textContent =
+    `${dim.w}×${dim.h} → ${out.width}×${out.height}  ·  ${ditherName}  ·  ${ms}ms  ·  drop zone${cmp}`;
 }
 
 function paintSwatches(name) {
@@ -344,9 +375,16 @@ function populatePalettes() {
     const o = document.createElement("option");
     o.value = k;
     o.textContent = k;
-    if (k === "pico8") o.selected = true;
     els.palette.appendChild(o);
+    if (els.paletteB) {
+      const o2 = document.createElement("option");
+      o2.value = k;
+      o2.textContent = k;
+      els.paletteB.appendChild(o2);
+    }
   });
+  els.palette.value = "pico8";
+  if (els.paletteB) els.paletteB.value = "gameboy";
   paintSwatches(els.palette.value);
 }
 
@@ -360,8 +398,7 @@ function scheduleRender() {
 populatePalettes();
 makeDemo();
 
-els.file.addEventListener("change", (e) => {
-  const file = e.target.files && e.target.files[0];
+function loadImageFile(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
@@ -370,14 +407,71 @@ els.file.addEventListener("change", (e) => {
       sourceImage = img;
       paintSource(img);
       render();
-      els.status.textContent = `loaded ${file.name} (${img.width}×${img.height})`;
+      els.status.textContent = `loaded ${file.name} (${img.width}×${img.height}) · drop zone`;
     };
     img.src = reader.result;
   };
   reader.readAsDataURL(file);
+}
+
+function firstImageFile(fileList) {
+  if (!fileList || !fileList.length) return null;
+  for (let i = 0; i < fileList.length; i++) {
+    if (fileList[i].type && fileList[i].type.startsWith("image/")) return fileList[i];
+  }
+  return fileList[0];
+}
+
+function setDropTarget(on) {
+  document.body.classList.toggle("drop-target", on);
+  if (appEl) appEl.classList.toggle("drop-target", on);
+}
+
+function blockDrag(e) {
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+["dragenter", "dragover"].forEach((name) => {
+  document.body.addEventListener(name, (e) => {
+    blockDrag(e);
+    setDropTarget(true);
+  });
+  if (appEl) {
+    appEl.addEventListener(name, (e) => {
+      blockDrag(e);
+      setDropTarget(true);
+    });
+  }
 });
 
-["palette", "dither", "pixelSize", "upscale", "crt", "scanlines"].forEach((id) => {
+document.body.addEventListener("dragleave", (e) => {
+  if (e.target === document.body) setDropTarget(false);
+});
+if (appEl) {
+  appEl.addEventListener("dragleave", (e) => {
+    if (e.target === appEl) setDropTarget(false);
+  });
+}
+
+function onDrop(e) {
+  blockDrag(e);
+  setDropTarget(false);
+  const file = firstImageFile(e.dataTransfer && e.dataTransfer.files);
+  if (file) loadImageFile(file);
+}
+
+document.body.addEventListener("drop", onDrop);
+if (appEl) appEl.addEventListener("drop", onDrop);
+
+els.file.addEventListener("change", (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  loadImageFile(file);
+});
+
+["palette", "paletteB", "dither", "pixelSize", "upscale", "crt", "scanlines", "serpentine"].forEach((id) => {
+  if (!els[id]) return;
   els[id].addEventListener("input", () => {
     if (id === "palette") paintSwatches(els.palette.value);
     scheduleRender();
@@ -387,6 +481,14 @@ els.file.addEventListener("change", (e) => {
     scheduleRender();
   });
 });
+
+if (els.compare) {
+  els.compare.addEventListener("click", () => {
+    compareOn = !compareOn;
+    els.compare.setAttribute("aria-pressed", compareOn ? "true" : "false");
+    scheduleRender();
+  });
+}
 
 els.download.addEventListener("click", () => {
   const a = document.createElement("a");

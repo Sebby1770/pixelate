@@ -1,6 +1,6 @@
 """PIXELATE — retro pixel art converter."""
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 __author__ = "Seb"
 
 from pixelate.animation import is_animated, pixelate_animation
@@ -15,6 +15,7 @@ from pixelate.core import (
     save_image,
 )
 from pixelate.dithering import dither_image
+from pixelate.effects import apply_phosphor
 from pixelate.palette_io import load_palette_file, register_palette, save_gpl, save_hex
 from pixelate.palettes import PALETTES, get_palette
 
@@ -31,6 +32,7 @@ __all__ = [
     "srgb_to_lab",
     "nearest_palette_indices",
     "dither_image",
+    "apply_phosphor",
     "save_gpl",
     "save_hex",
     "PALETTES",

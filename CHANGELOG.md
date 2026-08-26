@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.3.0] — 2026-08-26
+
+### Added
+
+- **k-means++** — auto-palette k-means uses k-means++ initialization (seed 0) instead of random unique picks.
+- **Phosphor mask** — `--phosphor` / `apply_phosphor()` RGB column stripes (after CRT, before scanlines).
+- **Bayer matrix size** — `--bayer-size 2|4|8` (default 4), threaded through `dither_image` (ignored unless dither is Bayer).
+- **Posterize pre-pass** — `--posterize N` (2–16 levels per channel) before palette quantization.
+- **Web lab** — drag-and-drop onto the page, serpentine checkbox (default on), palette compare split view.
+
+### Changed
+
+- CRT bloom runs **before** scanlines so scanlines stay sharp (phosphor sits between them).
+- `apply_crt` is glow + vignette only (no curvature).
+
+### Tests
+
+- CRT-then-scanlines vs scanlines-then-CRT, phosphor size/variation, k-means++ determinism, posterize ⊆ palette, CLI `--phosphor` / `--posterize 4`, Bayer size 8 ⊆ palette.
+
 ## [2.2.0] — 2026-08-26
 
 ### Added

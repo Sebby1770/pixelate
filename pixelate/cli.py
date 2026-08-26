@@ -113,6 +113,24 @@ def _common_convert_options(fn):
         click.option("--crt", is_flag=True, help="Apply CRT glow + vignette."),
         click.option("--scanlines", is_flag=True, help="Overlay horizontal scanlines."),
         click.option(
+            "--phosphor",
+            is_flag=True,
+            help="RGB phosphor column mask (after CRT, before scanlines).",
+        ),
+        click.option(
+            "--posterize",
+            type=click.IntRange(2, 16),
+            default=None,
+            help="Posterize each channel to N levels (2–16) before quantize.",
+        ),
+        click.option(
+            "--bayer-size",
+            type=click.Choice(["2", "4", "8"], case_sensitive=False),
+            default="4",
+            show_default=True,
+            help="Bayer matrix size (ignored unless --dither bayer).",
+        ),
+        click.option(
             "--colorspace",
             type=click.Choice(["lab", "rgb"], case_sensitive=False),
             default="lab",
@@ -208,6 +226,9 @@ def _convert_kwargs(
     contrast: float = 1.0,
     colorspace: str = "lab",
     serpentine: bool = True,
+    phosphor: bool = False,
+    posterize: Optional[int] = None,
+    bayer_size: int | str = 4,
 ) -> dict:
     return dict(
         palette=palette,
@@ -226,6 +247,9 @@ def _convert_kwargs(
         contrast=contrast,
         colorspace=colorspace,
         serpentine=serpentine,
+        phosphor=phosphor,
+        posterize=posterize,
+        bayer_size=int(bayer_size),
     )
 
 
@@ -265,6 +289,9 @@ def convert_cmd(
     edges: bool,
     crt: bool,
     scanlines: bool,
+    phosphor: bool,
+    posterize: int | None,
+    bayer_size: str,
     colorspace: str,
     serpentine: bool,
     report: bool,
@@ -285,6 +312,10 @@ def convert_cmd(
         effects.append("CRT")
     if scanlines:
         effects.append("scanlines")
+    if phosphor:
+        effects.append("phosphor")
+    if posterize is not None:
+        effects.append(f"posterize:{posterize}")
     if edges:
         effects.append("edges")
     if invert:
@@ -294,7 +325,7 @@ def convert_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
-        colorspace, serpentine,
+        colorspace, serpentine, phosphor, posterize, bayer_size,
     )
 
     info_panel(
@@ -384,6 +415,9 @@ def batch_cmd(
     edges: bool,
     crt: bool,
     scanlines: bool,
+    phosphor: bool,
+    posterize: int | None,
+    bayer_size: str,
     colorspace: str,
     serpentine: bool,
     report: bool,  # accepted but not printed per-file in batch
@@ -400,7 +434,7 @@ def batch_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
-        colorspace, serpentine,
+        colorspace, serpentine, phosphor, posterize, bayer_size,
     )
 
     info_panel(
@@ -507,6 +541,9 @@ def sheet_cmd(
     edges: bool,
     crt: bool,
     scanlines: bool,
+    phosphor: bool,
+    posterize: int | None,
+    bayer_size: str,
     colorspace: str,
     serpentine: bool,
     report: bool,
@@ -527,7 +564,7 @@ def sheet_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
-        colorspace, serpentine,
+        colorspace, serpentine, phosphor, posterize, bayer_size,
     )
 
     info_panel(

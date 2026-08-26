@@ -44,6 +44,18 @@ html, body {
   z-index: 1;
 }
 
+body.drop-target .app,
+.app.drop-target {
+  outline: 2px dashed var(--hot);
+  outline-offset: 6px;
+  box-shadow: 0 0 24px rgba(60, 255, 122, 0.18);
+}
+
+.btn[aria-pressed="true"] {
+  border-color: var(--hot);
+  color: var(--hot);
+}
+
 .mast {
   border: 1px solid var(--line);
   background: linear-gradient(180deg, #101a12, #0a100c);

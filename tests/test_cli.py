@@ -101,6 +101,29 @@ def test_unknown_palette_errors(tmp_path: Path):
     assert "Unknown palette" in (result.output + (result.exception and str(result.exception) or ""))
 
 
+def test_convert_phosphor_and_posterize(tmp_path: Path):
+    src = _write_rgb(tmp_path / "photo.png")
+    dest = tmp_path / "out.png"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "convert",
+            str(src),
+            "-o", str(dest),
+            "--pixel-size", "16",
+            "--upscale", "1",
+            "--dither", "none",
+            "--phosphor",
+            "--posterize", "4",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert dest.is_file()
+    with Image.open(dest) as im:
+        assert im.size[0] > 0 and im.size[1] > 0
+
+
 def test_palettes_save_gpl(tmp_path: Path):
     dest = tmp_path / "gb.gpl"
     runner = CliRunner()
