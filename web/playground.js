@@ -72,6 +72,9 @@ const els = {
   crt: document.getElementById("crt"),
   scanlines: document.getElementById("scanlines"),
   serpentine: document.getElementById("serpentine"),
+  phosphor: document.getElementById("phosphor"),
+  posterize: document.getElementById("posterize"),
+  posterizeVal: document.getElementById("posterizeVal"),
   compare: document.getElementById("compare"),
   download: document.getElementById("download"),
   srcCanvas: document.getElementById("srcCanvas"),
@@ -247,6 +250,47 @@ function bayer(data, w, h, palette, labPal) {
   }
 }
 
+function posterizeLevels() {
+  if (!els.posterize) return 0;
+  let n = Number(els.posterize.value);
+  if (n === 1) {
+    els.posterize.value = "0";
+    n = 0;
+  }
+  if (!n || n < 2) return 0;
+  return Math.min(8, n);
+}
+
+function posterizeData(data, levels) {
+  if (!levels || levels < 2) return;
+  const n = levels - 1;
+  for (let i = 0; i < data.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      const q = Math.round((data[i + c] * n) / 255);
+      data[i + c] = Math.round(q * (255 / n));
+    }
+  }
+}
+
+function applyPhosphorCanvas(canvas, ctx, strength) {
+  const s = strength == null ? 0.35 : strength;
+  const fade = 1 - s;
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  const w = canvas.width;
+  const h = canvas.height;
+  for (let x = 0; x < w; x++) {
+    const lane = x % 3;
+    for (let y = 0; y < h; y++) {
+      const i = (y * w + x) * 4;
+      if (lane !== 0) data[i] *= fade;
+      if (lane !== 1) data[i + 1] *= fade;
+      if (lane !== 2) data[i + 2] *= fade;
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
 function dither(imageData, name, palette, serpentine) {
   const { data, width, height } = imageData;
   const labPal = paletteLab(palette);
@@ -287,6 +331,8 @@ function pixelateBuffer(palette) {
   sctx.imageSmoothingEnabled = true;
   sctx.drawImage(sourceImage, 0, 0, dim.w, dim.h);
   const imageData = sctx.getImageData(0, 0, dim.w, dim.h);
+  const levels = posterizeLevels();
+  if (levels >= 2) posterizeData(imageData.data, levels);
   dither(imageData, ditherName, palette, serpentine);
   sctx.putImageData(imageData, 0, 0);
   return { small, dim };
@@ -305,7 +351,7 @@ function render() {
   const out = els.outCanvas;
   out.width = dim.w * upscale;
   out.height = dim.h * upscale;
-  const octx = out.getContext("2d");
+  const octx = out.getContext("2d", { willReadFrequently: true });
   octx.imageSmoothingEnabled = false;
 
   if (compareOn && els.paletteB) {
@@ -319,6 +365,10 @@ function render() {
     octx.fillRect(Math.max(0, mid - 1), 0, 2, out.height);
   } else {
     octx.drawImage(a.small, 0, 0, out.width, out.height);
+  }
+
+  if (els.phosphor && els.phosphor.checked) {
+    applyPhosphorCanvas(out, octx);
   }
 
   els.outFrame.classList.toggle("crt-on", els.crt.checked);
@@ -391,6 +441,10 @@ function populatePalettes() {
 function scheduleRender() {
   els.pixelSizeVal.textContent = els.pixelSize.value;
   els.upscaleVal.textContent = els.upscale.value;
+  if (els.posterizeVal && els.posterize) {
+    const n = posterizeLevels();
+    els.posterizeVal.textContent = n < 2 ? "off" : String(n);
+  }
   clearTimeout(renderTimer);
   renderTimer = setTimeout(render, 40);
 }
@@ -470,7 +524,7 @@ els.file.addEventListener("change", (e) => {
   loadImageFile(file);
 });
 
-["palette", "paletteB", "dither", "pixelSize", "upscale", "crt", "scanlines", "serpentine"].forEach((id) => {
+["palette", "paletteB", "dither", "pixelSize", "upscale", "crt", "scanlines", "serpentine", "phosphor", "posterize"].forEach((id) => {
   if (!els[id]) return;
   els[id].addEventListener("input", () => {
     if (id === "palette") paintSwatches(els.palette.value);

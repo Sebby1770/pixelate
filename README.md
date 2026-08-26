@@ -7,7 +7,7 @@
 ██╔═══╝ ██║ ██╔██╗ ██╔══╝  ██║     ██╔══██║   ██║   ██╔══╝
 ██║     ██║██╔╝ ██╗███████╗███████╗██║  ██║   ██║   ███████╗
 ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
-        retro pixel art from any image  ·  v2.3.0
+        retro pixel art from any image  ·  v2.4.0
 ```
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
@@ -17,7 +17,7 @@
 
 **Web lab:** [https://sebby1770.github.io/pixelate/](https://sebby1770.github.io/pixelate/)
 
-> Turn any image (or animated GIF) into authentic retro pixel art using classic gaming palettes, **CIELAB (CIE76) matching**, serpentine error diffusion, k-means++ auto palettes, eight dithering algorithms (including JJN), CRT bloom + phosphor + scanlines, indexed PNG/GIF, batch conversion, palette compare grids, and spritesheet export. Or open the static **web playground**. Or print it as ANSI art straight to your terminal.
+> Turn any image (or animated GIF) into authentic retro pixel art using classic gaming palettes, **CIELAB (CIE76) matching**, Lab-space k-means++ auto palettes, serpentine error diffusion, eight dithering algorithms (including JJN), CRT bloom + phosphor + scanlines, indexed PNG/GIF, parallel batch conversion, palette compare grids, and spritesheet export. Or open the static **web playground**. Or print it as ANSI art straight to your terminal.
 
 ---
 
@@ -34,8 +34,12 @@
 
 Modern image filters smooth everything out. PIXELATE goes the other way — it crushes color depth down to the exact palettes used by the consoles and home computers of the 80s and 90s, dithers cleverly to preserve detail, and gives you a finished pixel-art image that looks like it shipped on a cartridge.
 
-## Features (v2.3)
+## Features (v2.4)
 
+- **Lab k-means auto palette** — `--palette auto` clusters in CIE L*a*b* with k-means++ (same space as matching).
+- **`--seed`** — RNG seed for auto k-means (default 0); `lab_to_srgb()` is the vectorized inverse of `srgb_to_lab`.
+- **Batch `--jobs N`** — parallel workers via `ThreadPoolExecutor` when N>1 (default 1 is sequential).
+- **Web lab phosphor + posterize** — RGB column stripes on the output canvas; posterize 0=off or 2–8 before dither.
 - **k-means++ auto palette** — `--palette auto` clusters with k-means++ (deterministic seed).
 - **CRT order + phosphor** — bloom, then RGB phosphor mask (`--phosphor`), then sharp scanlines.
 - **Bayer size** — `--bayer-size 2|4|8` (default 4) when `--dither bayer`.
@@ -62,7 +66,7 @@ Modern image filters smooth everything out. PIXELATE goes the other way — it c
 - **CRT effects** — soft bloom + vignette, optional phosphor grille, horizontal scanlines.
 - **ASCII / ANSI mode** — render any image as colored terminal art.
 - **Beautifully retro CLI** — green-on-black banner, palette previews, swatches, progress bars.
-- **Clean Python API** — `pixelate_image()`, `dither_image()`, `srgb_to_lab()`, `extract_palette()`, `compare_palettes()`, and more.
+- **Clean Python API** — `pixelate_image()`, `dither_image()`, `srgb_to_lab()`, `lab_to_srgb()`, `extract_palette()`, `compare_palettes()`, and more.
 
 ## Install
 
@@ -101,6 +105,7 @@ Auto palette from the image:
 ```bash
 pixelate convert photo.jpg --palette auto --colors 12 --dither floyd -o auto.png
 pixelate convert photo.jpg --palette auto --colors 8 --extract-method median-cut
+pixelate convert photo.jpg --palette auto --colors 12 --seed 1
 ```
 
 Crank up the retro:
@@ -169,6 +174,7 @@ pixelate convert walk_cycle.gif --palette pico8 --pixel-size 64 -o walk_pixel.gi
 ```bash
 pixelate batch ./photos -o ./pixelated --palette vaporwave --dither sierra
 pixelate batch ./sprites -o ./out --recursive --palette db16
+pixelate batch ./photos -o ./out --jobs 4 --palette auto --colors 12
 ```
 
 ### Spritesheet
@@ -199,7 +205,7 @@ pixelate preview macintosh
 
 ### Web playground
 
-Open `web/index.html` locally (or the GitHub Pages deploy). Drop an image onto the lab, pick a palette / dither, toggle serpentine, compare two palettes, download a PNG. Processing is entirely in the browser.
+Open `web/index.html` locally (or the GitHub Pages deploy). Drop an image onto the lab, pick a palette / dither, toggle serpentine / phosphor, posterize, compare two palettes, download a PNG. Processing is entirely in the browser.
 
 ## CLI reference
 
@@ -209,6 +215,7 @@ pixelate convert IMAGE [OPTIONS]
       --palette-file    .hex or .gpl path (overrides --palette)
       --colors          color count for auto palette (default 16)
       --extract-method  kmeans | median-cut
+      --seed INT        auto-palette k-means RNG seed (default 0)
   -s, --pixel-size      Resolution of longest side (8–1024)
   -d, --dither          none | floyd | atkinson | bayer |
                         stucki | burkes | sierra | jjn
@@ -236,6 +243,7 @@ pixelate compare IMAGE [OPTIONS]
 
 pixelate batch INPUT_DIR -o OUTPUT_DIR [same convert options]
   -r, --recursive       Scan subdirectories
+      --jobs N          Parallel workers (default 1; ThreadPoolExecutor when >1)
 
 pixelate sheet PATH [PATH...] [OPTIONS]
   --cols N              Grid columns (default 4)
@@ -298,6 +306,7 @@ from pixelate import (
     register_palette,
     load_palette_file,
     srgb_to_lab,
+    lab_to_srgb,
     dither_image,
     save_gpl,
     save_hex,
@@ -323,8 +332,8 @@ img = pixelate_image(
 img.save("output.png")
 
 # Auto palette from image
-auto_colors = extract_palette("photo.jpg", n=12, method="kmeans")
-img = pixelate_image("photo.jpg", palette="auto", colors=12)
+auto_colors = extract_palette("photo.jpg", n=12, method="kmeans", seed=1)
+img = pixelate_image("photo.jpg", palette="auto", colors=12, seed=1)
 
 # Compare collage
 grid = compare_palettes("photo.jpg", ["gameboy", "nes", "pico8", "c64"])
@@ -367,7 +376,7 @@ sheet.save("sheet.png")
 
 1. **Pre-process (optional)** — invert, contrast, saturation, edge-aware sharpen, posterize.
 2. **Resize** — the source image is downsampled with Lanczos to a low resolution (you control this — `pixel_size`). This is the actual "pixelation."
-3. **Palette** — built-in name, custom file, RGB sequence, or **auto** extract via k-means++ / median-cut.
+3. **Palette** — built-in name, custom file, RGB sequence, or **auto** extract via Lab k-means++ / median-cut.
 4. **Quantize** — every pixel is matched against the chosen palette using CIE76 Lab (default) or Euclidean RGB.
 5. **Dither** — quantization error is spread with serpentine kernels (Floyd-Steinberg, Atkinson, Stucki, Burkes, Sierra, JJN) or hidden in a Bayer pattern (`--bayer-size`).
 6. **Upscale** — the small image is enlarged with nearest-neighbor so the pixels stay crisp and chunky (`upscale`, then optional extra `--scale`).
@@ -392,7 +401,7 @@ pixelate/
 │   ├── __main__.py
 │   ├── cli.py          # Click CLI (convert, compare, batch, sheet, extract, ascii, palettes)
 │   ├── core.py         # Conversion pipeline, auto palette, compare, report, indexed I/O
-│   ├── colorspace.py   # sRGB → Lab, nearest-palette indices
+│   ├── colorspace.py   # sRGB ↔ Lab, nearest-palette indices
 │   ├── animation.py    # Multi-frame GIF/WebP (shared P palette)
 │   ├── palette_io.py   # .hex / .gpl load + save + register_palette
 │   ├── palettes.py     # Built-in retro palettes
@@ -425,6 +434,7 @@ pixelate/
 - [x] Web playground
 - [x] Optional LAB / perceptual color distance (CIE76, default)
 - [x] k-means++ auto palette, phosphor mask, Bayer size, posterize pre-pass
+- [x] Lab-space k-means, `--seed`, batch `--jobs`, web phosphor/posterize
 
 ## License
 

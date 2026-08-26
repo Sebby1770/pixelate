@@ -124,3 +124,38 @@ def test_kmeans_plus_plus_deterministic():
     for c in a:
         assert len(c) == 3
         assert all(0 <= v <= 255 for v in c)
+
+
+def test_extract_palette_same_seed_identical():
+    rng = np.random.default_rng(3)
+    arr = rng.integers(0, 256, size=(40, 40, 3), dtype=np.uint8)
+    src = Image.fromarray(arr, mode="RGB")
+    a = extract_palette(src, n=8, method="kmeans", seed=7)
+    b = extract_palette(src, n=8, method="kmeans", seed=7)
+    assert a == b
+    assert 1 <= len(a) <= 8
+
+
+def test_extract_palette_seed_0_vs_1():
+    """Seed 0 vs 1 may differ; skip a differ-assert on flat images."""
+    if SOURCE.is_file():
+        src = Image.open(SOURCE).convert("RGB")
+    else:
+        y, x = np.mgrid[0:32, 0:32]
+        arr = np.stack(
+            [
+                (x * 8).astype(np.uint8),
+                (y * 8).astype(np.uint8),
+                ((x + y) * 4).astype(np.uint8),
+            ],
+            axis=-1,
+        )
+        src = Image.fromarray(arr, mode="RGB")
+    a = extract_palette(src, n=8, method="kmeans", seed=0)
+    b = extract_palette(src, n=8, method="kmeans", seed=1)
+    assert 1 <= len(a) <= 8
+    assert 1 <= len(b) <= 8
+    for pal in (a, b):
+        for c in pal:
+            assert len(c) == 3
+            assert all(0 <= v <= 255 for v in c)

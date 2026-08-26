@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from pixelate.colorspace import nearest_palette_indices, srgb_to_lab
+from pixelate.colorspace import lab_to_srgb, nearest_palette_indices, srgb_to_lab
 
 
 def test_srgb_to_lab_gray_is_achromatic():
@@ -28,6 +28,28 @@ def test_srgb_to_lab_float_0_255_matches_uint8():
 def test_srgb_to_lab_accepts_unit_float():
     white = srgb_to_lab(np.array([[1.0, 1.0, 1.0]], dtype=np.float64))
     assert abs(white[0, 0] - 100.0) < 1.5
+
+
+def test_lab_to_srgb_gray_is_achromatic():
+    lab = np.array(
+        [[0.0, 0.0, 0.0], [25.0, 0.0, 0.0], [50.0, 0.0, 0.0], [75.0, 0.0, 0.0], [100.0, 0.0, 0.0]],
+        dtype=np.float64,
+    )
+    rgb = lab_to_srgb(lab)
+    assert rgb.dtype == np.float64
+    assert rgb.min() >= 0.0 and rgb.max() <= 255.0
+    # Neutrals stay gray (R=G=B); brightness tracks L
+    assert np.max(np.abs(rgb[:, 0] - rgb[:, 1])) < 2.0
+    assert np.max(np.abs(rgb[:, 1] - rgb[:, 2])) < 2.0
+    assert rgb[0, 0] < rgb[1, 0] < rgb[2, 0] < rgb[3, 0] < rgb[4, 0]
+    assert rgb[0, 0] < 2.0
+    assert abs(rgb[4, 0] - 255.0) < 2.0
+
+
+def test_lab_srgb_roundtrip_mid_gray():
+    rgb = np.array([[128.0, 128.0, 128.0]], dtype=np.float64)
+    back = lab_to_srgb(srgb_to_lab(rgb))
+    assert np.max(np.abs(back - rgb)) < 2.0
 
 
 def test_nearest_lab_can_differ_from_rgb_on_reddish_pixel():

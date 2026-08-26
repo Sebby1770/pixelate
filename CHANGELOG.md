@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.4.0] — 2026-08-26
+
+### Added
+
+- **Lab k-means** — auto-palette k-means++ clusters in CIE L*a*b* (same space as matching), then converts centers back with `lab_to_srgb()`.
+- **`lab_to_srgb()`** — vectorized inverse of `srgb_to_lab` (D65, same matrices); RGB clipped to 0–255 floats.
+- **`--seed INT`** — RNG seed for auto-palette k-means (default 0). `extract_palette(..., seed=)` / `pixelate_image(..., seed=)`.
+- **Batch `--jobs N`** — `ThreadPoolExecutor` when N>1 (default 1 stays sequential, no executor). Failures still raise after the run.
+- **Web lab** — phosphor checkbox (RGB column stripes on the output canvas) and posterize slider (0=off, 2–8 bit-crush before dither). Version tag 2.4.0.
+
+### Tests
+
+- `lab_to_srgb` gray / mid-gray round-trip, `extract_palette` same-seed identity, seed 0 vs 1, CLI `--seed 1` with `--palette auto`, batch `--jobs 2`.
+
 ## [2.3.0] — 2026-08-26
 
 ### Added

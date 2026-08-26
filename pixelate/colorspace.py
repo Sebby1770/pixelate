@@ -22,9 +22,14 @@ _RGB_TO_XYZ = np.array(
     dtype=np.float64,
 )
 
+# Inverse of the same matrix (XYZ → linear sRGB)
+_XYZ_TO_RGB = np.linalg.inv(_RGB_TO_XYZ)
+
 # CIE L* piecewise threshold (6/29)^3
 _LAB_DELTA = 6.0 / 29.0
 _LAB_DELTA3 = _LAB_DELTA ** 3
+# sRGB electro-optical transfer linear-segment end
+_SRGB_LINEAR_CUTOFF = 0.0031308
 
 
 def _as_unit_srgb(flat: np.ndarray, dtype_in) -> np.ndarray:
@@ -82,6 +87,55 @@ def srgb_to_lab(arr: np.ndarray) -> np.ndarray:
     b = 200.0 * (f[:, 1] - f[:, 2])
     lab = np.stack([L, a, b], axis=-1)
     return lab.reshape(orig_shape)
+
+
+def lab_to_srgb(arr: np.ndarray) -> np.ndarray:
+    """
+    Convert CIE L*a*b* (D65) to sRGB, vectorized inverse of :func:`srgb_to_lab`.
+
+    Parameters
+    ----------
+    arr :
+        ``Nx3`` (or ``...x3``) Lab as float. ``L`` is ``[0, 100]``; ``a`` / ``b``
+        are typically ``[-128, 127]``.
+
+    Returns
+    -------
+    ndarray
+        Same leading shape as *arr*, last dim RGB as float64 clipped to
+        ``[0, 255]`` (uint8-capable, not cast).
+    """
+    lab = np.asarray(arr, dtype=np.float64)
+    if lab.size == 0:
+        return np.zeros(lab.shape, dtype=np.float64)
+    if lab.shape[-1] != 3:
+        raise ValueError(f"Expected ...x3 Lab array, got shape {lab.shape}")
+
+    orig_shape = lab.shape
+    flat = lab.reshape(-1, 3)
+
+    fy = (flat[:, 0] + 16.0) / 116.0
+    fx = flat[:, 1] / 500.0 + fy
+    fz = fy - flat[:, 2] / 200.0
+    f = np.stack([fx, fy, fz], axis=-1)
+
+    t = np.where(
+        f > _LAB_DELTA,
+        f ** 3,
+        (f - 4.0 / 29.0) * (3.0 * _LAB_DELTA * _LAB_DELTA),
+    )
+    xyz = t * _D65_WHITE
+    linear = xyz @ _XYZ_TO_RGB.T
+
+    # IEC 61966-2-1; clip negatives before the power branch
+    lin_pos = np.clip(linear, 0.0, None)
+    srgb = np.where(
+        linear <= _SRGB_LINEAR_CUTOFF,
+        12.92 * linear,
+        1.055 * np.power(lin_pos, 1.0 / 2.4) - 0.055,
+    )
+    rgb = np.clip(srgb * 255.0, 0.0, 255.0)
+    return rgb.reshape(orig_shape)
 
 
 def nearest_palette_indices(

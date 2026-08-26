@@ -124,6 +124,52 @@ def test_convert_phosphor_and_posterize(tmp_path: Path):
         assert im.size[0] > 0 and im.size[1] > 0
 
 
+def test_convert_auto_seed(tmp_path: Path):
+    src = _write_rgb(tmp_path / "photo.png")
+    dest = tmp_path / "out.png"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "convert",
+            str(src),
+            "-o", str(dest),
+            "--palette", "auto",
+            "--colors", "4",
+            "--seed", "1",
+            "--pixel-size", "16",
+            "--upscale", "1",
+            "--dither", "none",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert dest.is_file()
+
+
+def test_batch_jobs_2(tmp_path: Path):
+    inp = tmp_path / "in"
+    out = tmp_path / "out"
+    inp.mkdir()
+    Image.new("RGB", (20, 20), (10, 20, 30)).save(inp / "a.png")
+    Image.new("RGB", (24, 18), (40, 80, 120)).save(inp / "b.png")
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "batch",
+            str(inp),
+            "-o", str(out),
+            "--jobs", "2",
+            "--pixel-size", "16",
+            "--upscale", "1",
+            "--dither", "none",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    pngs = sorted(out.glob("*.png"))
+    assert len(pngs) == 2
+
+
 def test_palettes_save_gpl(tmp_path: Path):
     dest = tmp_path / "gb.gpl"
     runner = CliRunner()

@@ -67,6 +67,12 @@ def _common_convert_options(fn):
             help="Auto-palette extraction algorithm.",
         ),
         click.option(
+            "--seed",
+            type=int,
+            default=None,
+            help="RNG seed for auto-palette k-means (default 0). Only used with --palette auto.",
+        ),
+        click.option(
             "-s", "--pixel-size",
             type=click.IntRange(8, 1024),
             default=96,
@@ -229,6 +235,7 @@ def _convert_kwargs(
     phosphor: bool = False,
     posterize: Optional[int] = None,
     bayer_size: int | str = 4,
+    seed: Optional[int] = None,
 ) -> dict:
     return dict(
         palette=palette,
@@ -250,6 +257,7 @@ def _convert_kwargs(
         phosphor=phosphor,
         posterize=posterize,
         bayer_size=int(bayer_size),
+        seed=seed,
     )
 
 
@@ -279,6 +287,7 @@ def convert_cmd(
     palette_file: Path | None,
     colors: int,
     extract_method: str,
+    seed: int | None,
     pixel_size: int,
     dither: str,
     upscale: int,
@@ -325,7 +334,7 @@ def convert_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
-        colorspace, serpentine, phosphor, posterize, bayer_size,
+        colorspace, serpentine, phosphor, posterize, bayer_size, seed,
     )
 
     info_panel(
@@ -396,15 +405,24 @@ def convert_cmd(
     help="Directory for converted images.",
 )
 @click.option("--recursive", "-r", is_flag=True, help="Scan subdirectories.")
+@click.option(
+    "--jobs",
+    type=click.IntRange(1, 32),
+    default=1,
+    show_default=True,
+    help="Parallel workers (ThreadPoolExecutor when greater than 1).",
+)
 @_common_convert_options
 def batch_cmd(
     input_dir: Path,
     output_dir: Path,
     recursive: bool,
+    jobs: int,
     palette: str,
     palette_file: Path | None,
     colors: int,
     extract_method: str,
+    seed: int | None,
     pixel_size: int,
     dither: str,
     upscale: int,
@@ -434,7 +452,7 @@ def batch_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
-        colorspace, serpentine, phosphor, posterize, bayer_size,
+        colorspace, serpentine, phosphor, posterize, bayer_size, seed,
     )
 
     info_panel(
@@ -443,6 +461,7 @@ def batch_cmd(
             f"[cyan]Input:[/cyan]     {input_dir}\n"
             f"[cyan]Output:[/cyan]    {output_dir}\n"
             f"[cyan]Images:[/cyan]    {len(images)}\n"
+            f"[cyan]Jobs:[/cyan]      {jobs}\n"
             f"[cyan]Palette:[/cyan]   [yellow]{_palette_label(palette, palette_file, colors)}[/yellow]\n"
             f"[cyan]Dither:[/cyan]    {dither}"
         ),
@@ -450,6 +469,23 @@ def batch_cmd(
 
     ok = 0
     errors: list[str] = []
+
+    def _convert_one(src: Path) -> None:
+        rel = src.relative_to(input_dir) if src.is_relative_to(input_dir) else src.name
+        out_name = Path(rel).stem + "_pixel"
+        if is_animated(src):
+            dest = output_dir / Path(rel).with_name(out_name + ".gif")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            pixelate_animation(src, output=dest, **kwargs)
+        else:
+            dest = output_dir / Path(rel).with_name(out_name + ".png")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            result = pixelate_image(src, **kwargs)
+            save_image(
+                result,
+                dest,
+                palette=result.info.get(PALETTE_INFO_KEY),
+            )
 
     with Progress(
         SpinnerColumn(style="green"),
@@ -460,27 +496,27 @@ def batch_cmd(
         console=console,
     ) as progress:
         task = progress.add_task("[green]Converting...", total=len(images))
-        for src in images:
-            rel = src.relative_to(input_dir) if src.is_relative_to(input_dir) else src.name
-            out_name = Path(rel).stem + "_pixel"
-            try:
-                if is_animated(src):
-                    dest = output_dir / Path(rel).with_name(out_name + ".gif")
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    pixelate_animation(src, output=dest, **kwargs)
-                else:
-                    dest = output_dir / Path(rel).with_name(out_name + ".png")
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    result = pixelate_image(src, **kwargs)
-                    save_image(
-                        result,
-                        dest,
-                        palette=result.info.get(PALETTE_INFO_KEY),
-                    )
-                ok += 1
-            except Exception as exc:  # noqa: BLE001 — report and continue batch
-                errors.append(f"{src.name}: {exc}")
-            progress.advance(task)
+        if jobs <= 1:
+            for src in images:
+                try:
+                    _convert_one(src)
+                    ok += 1
+                except Exception as exc:  # noqa: BLE001 — report and continue batch
+                    errors.append(f"{src.name}: {exc}")
+                progress.advance(task)
+        else:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            with ThreadPoolExecutor(max_workers=jobs) as pool:
+                futures = {pool.submit(_convert_one, src): src for src in images}
+                for fut in as_completed(futures):
+                    src = futures[fut]
+                    try:
+                        fut.result()
+                        ok += 1
+                    except Exception as exc:  # noqa: BLE001 — report and continue batch
+                        errors.append(f"{src.name}: {exc}")
+                    progress.advance(task)
 
     console.print(f"[bold green]✓[/bold green] Converted {ok}/{len(images)} images → [cyan]{output_dir}[/cyan]")
     for err in errors:
@@ -531,6 +567,7 @@ def sheet_cmd(
     palette_file: Path | None,
     colors: int,
     extract_method: str,
+    seed: int | None,
     pixel_size: int,
     dither: str,
     upscale: int,
@@ -564,7 +601,7 @@ def sheet_cmd(
     kwargs = _convert_kwargs(
         palette, palette_file, pixel_size, dither, upscale, saturation,
         crt, scanlines, colors, extract_method, scale, edges, invert, contrast,
-        colorspace, serpentine, phosphor, posterize, bayer_size,
+        colorspace, serpentine, phosphor, posterize, bayer_size, seed,
     )
 
     info_panel(
@@ -772,6 +809,12 @@ def ascii_cmd(input_path: Path, width: int, ramp: str, color: bool,
     show_default=True,
 )
 @click.option(
+    "--seed",
+    type=int,
+    default=None,
+    help="RNG seed for k-means (default 0).",
+)
+@click.option(
     "--hex",
     "write_hex",
     is_flag=True,
@@ -782,11 +825,12 @@ def extract_cmd(
     output_path: Path,
     colors: int,
     extract_method: str,
+    seed: int | None,
     write_hex: bool,
 ) -> None:
     """Extract N colors from IMAGE and write a GIMP .gpl (optional .hex)."""
     print_banner()
-    pal = extract_palette(input_path, n=colors, method=extract_method)
+    pal = extract_palette(input_path, n=colors, method=extract_method, seed=seed)
     name = input_path.stem
     suffix = output_path.suffix.lower()
     if suffix == ".hex":

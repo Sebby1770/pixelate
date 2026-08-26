@@ -15,7 +15,7 @@
   <div class="app">
     <header class="mast">
       <pre class="logo" aria-label="PIXELATE">PIXELATE</pre>
-      <p class="tag">web lab · v2.3.0 · drop zone · file stays in the browser · lab matching</p>
+      <p class="tag">web lab · v2.4.0 · drop zone · file stays in the browser · lab matching</p>
     </header>
 
     <section class="rack">
@@ -55,6 +55,11 @@
         <input id="upscale" type="range" min="1" max="8" step="1" value="4" />
       </label>
 
+      <label class="field slider">
+        posterize <span id="posterizeVal">off</span>
+        <input id="posterize" type="range" min="0" max="8" step="1" value="0" />
+      </label>
+
       <label class="tog">
         <input id="crt" type="checkbox" />
         CRT
@@ -66,6 +71,10 @@
       <label class="tog">
         <input id="serpentine" type="checkbox" checked />
         serpentine
+      </label>
+      <label class="tog">
+        <input id="phosphor" type="checkbox" />
+        phosphor
       </label>
 
       <button id="compare" class="btn" type="button" aria-pressed="false">compare</button>

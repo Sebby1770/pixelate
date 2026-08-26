@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pixelate"
-version = "2.3.0"
-description = "A retro pixel art converter CLI with CIELAB matching, serpentine dithering, classic palettes, indexed PNG/GIF, CRT effects, animation, batch convert, and a static web playground."
+version = "2.4.0"
+description = "A retro pixel art converter CLI with CIELAB matching, Lab k-means auto palettes, serpentine dithering, classic palettes, indexed PNG/GIF, CRT effects, animation, parallel batch convert, and a static web playground."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }

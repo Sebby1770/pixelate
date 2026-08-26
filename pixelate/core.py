@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
-from pixelate.colorspace import nearest_palette_indices
+from pixelate.colorspace import lab_to_srgb, nearest_palette_indices, srgb_to_lab
 from pixelate.dithering import dither_image
 from pixelate.palettes import RGB, Palette, get_palette
 
@@ -235,18 +235,24 @@ def _kmeans_plus_plus_init(pixels: np.ndarray, n: int, rng: np.random.Generator)
     return centers
 
 
-def _kmeans_palette(pixels: np.ndarray, n: int, max_iter: int = 20) -> Palette:
-    """k-means clustering in RGB space with k-means++ init (numpy only)."""
+def _kmeans_palette(
+    pixels: np.ndarray,
+    n: int,
+    max_iter: int = 20,
+    seed: Optional[int] = None,
+) -> Palette:
+    """k-means clustering in Lab space with k-means++ init (numpy only)."""
     if pixels.shape[0] == 0:
         raise ValueError("No pixels to cluster")
     n = max(1, min(n, pixels.shape[0]))
 
-    rng = np.random.default_rng(0)
-    centers = _kmeans_plus_plus_init(pixels, n, rng)
+    rng = np.random.default_rng(0 if seed is None else int(seed))
+    lab_pixels = srgb_to_lab(np.clip(pixels, 0, 255))
+    centers = _kmeans_plus_plus_init(lab_pixels, n, rng)
 
     for _ in range(max_iter):
         # Assign
-        diffs = pixels[:, None, :] - centers[None, :, :]  # (N, K, 3)
+        diffs = lab_pixels[:, None, :] - centers[None, :, :]  # (N, K, 3)
         dist = np.einsum("ijk,ijk->ij", diffs, diffs)
         labels = np.argmin(dist, axis=1)
 
@@ -254,18 +260,19 @@ def _kmeans_palette(pixels: np.ndarray, n: int, max_iter: int = 20) -> Palette:
         for k in range(centers.shape[0]):
             mask = labels == k
             if np.any(mask):
-                new_centers[k] = pixels[mask].mean(axis=0)
+                new_centers[k] = lab_pixels[mask].mean(axis=0)
             else:
                 # Re-seed empty cluster
-                new_centers[k] = pixels[rng.integers(0, pixels.shape[0])]
+                new_centers[k] = lab_pixels[rng.integers(0, lab_pixels.shape[0])]
 
         if np.allclose(new_centers, centers, atol=0.5):
             centers = new_centers
             break
         centers = new_centers
 
-    # Sort by luminance for stable ordering
-    centers = np.clip(np.round(centers), 0, 255).astype(np.int32)
+    # Back to sRGB, then sort by luminance for stable ordering
+    rgb = lab_to_srgb(centers)
+    centers = np.clip(np.round(rgb), 0, 255).astype(np.int32)
     order = np.argsort(0.299 * centers[:, 0] + 0.587 * centers[:, 1] + 0.114 * centers[:, 2])
     centers = centers[order]
 
@@ -332,6 +339,7 @@ def extract_palette(
     n: int = 16,
     method: str = "kmeans",
     max_samples: int = 10000,
+    seed: Optional[int] = None,
 ) -> Palette:
     """
     Extract an N-color palette from an image (auto palette).
@@ -343,9 +351,11 @@ def extract_palette(
     n :
         Target number of colors (clamped to unique sample size).
     method :
-        ``"kmeans"`` (default, k-means++ init) or ``"median-cut"`` / ``"mediancut"``.
+        ``"kmeans"`` (default, k-means++ init in Lab) or ``"median-cut"`` / ``"mediancut"``.
     max_samples :
         Subsample large images for speed.
+    seed :
+        RNG seed for k-means++ (default ``0`` when *None*). Ignored for median-cut.
 
     Returns
     -------
@@ -382,7 +392,7 @@ def extract_palette(
 
     key = method.lower().strip().replace("_", "-")
     if key in ("kmeans", "k-means"):
-        return _kmeans_palette(pixels, n)
+        return _kmeans_palette(pixels, n, seed=seed)
     if key in ("median-cut", "mediancut", "median"):
         return _median_cut_palette(pixels, n)
     raise ValueError(f"Unknown extract method '{method}'. Use 'kmeans' or 'median-cut'.")
@@ -592,6 +602,7 @@ def pixelate_image(
     phosphor: bool = False,
     posterize: Optional[int] = None,
     bayer_size: int = 4,
+    seed: Optional[int] = None,
 ) -> Image.Image:
     """
     Convert an image into retro pixel art.
@@ -623,7 +634,10 @@ def pixelate_image(
     colors : int
         When *palette* is ``"auto"``, number of colors to extract.
     extract_method : str
-        Auto-palette method: ``"kmeans"`` or ``"median-cut"``.
+        Auto-palette method: ``"kmeans"`` (Lab k-means++) or ``"median-cut"``.
+    seed : int, optional
+        RNG seed for auto-palette k-means (default ``0``). Ignored unless
+        *palette* is ``"auto"``.
     scale : int
         Extra integer nearest-neighbor upscale applied after the main
         pipeline (default 1 = none). Use for chunky display pixels.
@@ -689,7 +703,9 @@ def pixelate_image(
     if palette_file is not None:
         palette_colors = resolve_palette(palette, palette_file=palette_file)
     elif isinstance(palette, str) and palette.lower().strip() == "auto":
-        palette_colors = extract_palette(img, n=colors, method=extract_method)
+        palette_colors = extract_palette(
+            img, n=colors, method=extract_method, seed=seed
+        )
     else:
         palette_colors = resolve_palette(palette, palette_file=None)
 
