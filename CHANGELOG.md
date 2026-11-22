@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
+## [3.0.0] — 2026-11-22
+
+### Added
+
+- **Hardware modes** (`pixelate/hardware.py`, `--hardware`) — attribute-clash emulation for ZX Spectrum (ink + paper per 8×8 cell from one BRIGHT bank), C64 hires (2 of 16 per 8×8), C64 multicolor (double-wide pixels, shared background + 3 per 4×8 cell), MSX / TMS9918 (2 colors per 8×1) and NES (universal background + four 3-color sub-palettes on 16×16 areas, chosen by a facility-location search). Every legal combination is scored per cell in Lab/RGB, then any dither runs inside each cell's colors. Defaults to the machine's native resolution. `clash_report()` summary on `result.info["pixelate_hardware"]`; `pixelate hardware` lists the rules; `compare --palettes hw:zx,hw:nes,...`.
+- **Pattern dithering** — `pattern` (Thomas Knoll's candidate mixing over Bayer 8×8), `bluenoise` (deterministic void-and-cluster mask) and `halftone` (clustered-dot screen). Fully vectorized. Aliases `knoll`, `blue-noise`, `fs`, `ordered` in the API. `dither_indices()` returns palette indices.
+- **Presets** (`pixelate/presets.py`, `--preset`, `--presets-file`, `pixelate presets`) — 12 built-in looks; JSON user presets; typed CLI flags / non-default API arguments always win.
+- **Exports** (`pixelate/export.py`) — `-o art.svg` (run-merged rects grouped by color, `crispEdges`, transparency), `.json` (`pixelate-indexed` v1), `.h` / `.c` (palette + index arrays), `pixelate swatches` palette sheets. Results carry the logical index map on `result.info["pixelate_indices"]`.
+- **Effects** — `--outline` / `--outline-color` (palette-locked, alpha-aware), `--grid`, `--chromatic`, `--color-bleed` (NTSC YIQ), `--curvature` (barrel CRT), `--cleanup` (orphan pixels). Outline, grid, chromatic and bleed were first written for the unmerged 3.0 branch (PR #3) and are folded in here.
+- **Upscalers** (`pixelate/upscale.py`, `--upscaler`) — Scale2x / Scale3x / Scale4x (EPX); never introduce new colors.
+- **Palettes** — Game Gear, Virtual Boy, Amstrad CPC, Teletext, DB32, CGA palette 0, 1-bit, SLSO8, 2-bit Demichrome, Kirokaze GB, Ice Cream GB, Hollow, AYY4 (+ aliases). 38 unique palettes.
+- **Commands** — `pixelate hardware`, `presets`, `dithers`, `swatches`.
+- **PIXELATE Studio** — the web lab rebuilt around a worker-hosted port of the Python engine (see `web/`).
+- **Tooling** — `tools/build_web_data.py` generates `web/data.json` / `web/data.js` from the package; ruff + mypy configs; CI matrix 3.9–3.14, lint job, web job (fresh data + `node --test`).
+
+### Changed
+
+- **Error diffusion is 30–80× faster** — `pixelate/lut.py` caches a 64³ nearest-palette table per (palette, space); diffusion runs on a padded scalar buffer. Floyd–Steinberg 512 px 3.9 s → 0.12 s; CIEDE2000 256 px 3.1 s → 33 ms. Outputs can differ from 2.5 on pixels within ~2 RGB units of a palette boundary; `--dither none` is still exact.
+- The pipeline quantizes to an index map first, so cleanup, outline and exports stay palette-locked.
+- `pixelate_animation()` forwards every `pixelate_image()` option and resolves presets once for all frames.
+- PIL resampling constants use `Image.Resampling.*`.
+
 ## [2.5.0] — 2026-08-26
 
 ### Added
