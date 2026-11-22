@@ -72,7 +72,7 @@ Dev / tests:
 pip install -e ".[dev]"
 pytest
 ruff check . && mypy
-node --test web/tests/
+node --test "web/tests/*.test.cjs"
 ```
 
 ## Usage

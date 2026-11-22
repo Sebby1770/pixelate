@@ -75,4 +75,4 @@ jobs:
           git diff --exit-code -- web/data.json web/data.js
 
       - name: Web engine tests
-        run: node --test web/tests/
+        run: node --test "web/tests/*.test.cjs"

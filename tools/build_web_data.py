@@ -14,7 +14,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from pixelate import __version__  # noqa: E402
-from pixelate.dithering import DITHER_DESCRIPTIONS, KERNELS  # noqa: E402
+from pixelate.core import _defaults  # noqa: E402
+from pixelate.dithering import (  # noqa: E402
+    DITHER_DESCRIPTIONS,
+    KERNELS,
+    PATTERN_CANDIDATES,
+    PATTERN_ERROR_MULTIPLIER,
+    bayer_matrix,
+    blue_noise,
+    halftone_matrix,
+)
 from pixelate.hardware import HARDWARE_MODES  # noqa: E402
 from pixelate.palettes import PALETTES  # noqa: E402
 from pixelate.presets import PRESETS  # noqa: E402
@@ -41,6 +50,20 @@ def build() -> dict:
         "palettes": palettes,
         "paletteAliases": aliases,
         "kernels": {k: [list(t) for t in v] for k, v in KERNELS.items()},
+        "pattern": {"candidates": PATTERN_CANDIDATES, "multiplier": PATTERN_ERROR_MULTIPLIER},
+        "thresholds": {
+            name: {"size": int(m.shape[0]), "ranks": [int(v) for v in (m * m.size).round().ravel()]}
+            for name, m in (
+                ("pattern", bayer_matrix(8)),
+                ("halftone", halftone_matrix()),
+                ("bluenoise", blue_noise()),
+            )
+        },
+        "defaults": {
+            k: (list(v) if isinstance(v, tuple) else v)
+            for k, v in _defaults().items()
+            if isinstance(v, (int, float, str, bool, tuple, type(None)))
+        },
         "dithers": DITHER_DESCRIPTIONS,
         "hardware": {
             m.name: {
