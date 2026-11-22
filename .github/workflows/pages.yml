@@ -30,6 +30,7 @@ jobs:
         run: |
           mkdir -p _site
           cp -R web/. _site/
+          rm -rf _site/tests
           if [ -d assets ]; then cp -R assets _site/assets; fi
           touch _site/.nojekyll
 

@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pixelate"
 version = "3.0.0"
-description = "A retro pixel art converter CLI with box downscale, CIEDE2000 matching, Lab k-means auto palettes, Sierra-3/Lite dithering, classic palettes, indexed PNG/GIF, CRT effects, animation, process-pool batch convert, and a static web playground."
+description = "Retro pixel art converter: ZX Spectrum / C64 / MSX / NES attribute-clash emulation, Knoll pattern and blue-noise dithering, a fast LUT error-diffusion engine, presets, SVG/JSON/C export, CRT effects, animation, and a browser Studio."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [
     { name = "Seb", email = "sebforbes03@gmail.com" }
 ]
-keywords = ["pixel-art", "retro", "gameboy", "nes", "ascii-art", "cli", "image-processing"]
+keywords = ["pixel-art", "retro", "dithering", "zx-spectrum", "c64", "nes", "gameboy", "ascii-art", "cli", "image-processing"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",

@@ -229,8 +229,11 @@ def choose_cell_colors(
     pix_m = _to_metric(image.reshape(-1, 3), metric).reshape(image.shape)
     cw, ch = mode.cell
     cells, rows, cols = _cells(pix_m, cw, ch)
-    diff = cells[:, :, None, :] - pal_m[None, None, :, :]
-    dist = np.einsum("npkc,npkc->npk", diff, diff)  # (N, px, P)
+    # Squared distances (N, px, P) via |a|² - 2ab + |b|² — no (N, px, P, 3) temp.
+    cell_sq = np.einsum("npc,npc->np", cells, cells)
+    pal_sq = np.einsum("kc,kc->k", pal_m, pal_m)
+    dist = cell_sq[:, :, None] - 2.0 * (cells @ pal_m.T) + pal_sq[None, None, :]
+    np.maximum(dist, 0.0, out=dist)
 
     bg_candidates: List[Optional[int]] = [None]
     if mode.shared:

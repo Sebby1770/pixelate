@@ -187,7 +187,7 @@ def diffuse_indices(
                 buf[j + 1] += eg * wt
                 buf[j + 2] += eb * wt
 
-    return np.frombuffer(bytes(out), dtype=np.uint8).reshape(h, w)
+    return np.frombuffer(out, dtype=np.uint8).reshape(h, w)  # bytearray → writable
 
 
 def _error_diffuse(

@@ -974,17 +974,20 @@ def save_image(
     suffix = p.suffix.lower()
     from pixelate.export import EXPORT_SUFFIXES, export_indexed
     if suffix in EXPORT_SUFFIXES:
-        pal = palette or img.info.get(PALETTE_INFO_KEY)
+        pal = palette if palette is not None else img.info.get(PALETTE_INFO_KEY)
         idx = img.info.get(INDICES_INFO_KEY)
         if pal is None:
             pal = collect_working_colors([img])
+        pal = [tuple(int(v) for v in c[:3]) for c in pal]
         if idx is None:
             idx = np.asarray(image_to_indexed(img, pal))
         transparent = None
         if img.mode == "RGBA":
             a = np.asarray(img.getchannel("A").resize((idx.shape[1], idx.shape[0]), Image.Resampling.NEAREST))
             transparent = a < 128
-        return export_indexed(idx, pal, p, transparent=transparent)
+        # SVG width/height match the raster output; the viewBox stays the art grid.
+        pixel = max(1, img.size[0] // max(1, idx.shape[1]))
+        return export_indexed(idx, pal, p, pixel=pixel, transparent=transparent)
     if suffix in {".jpg", ".jpeg"} and not allow_jpeg:
         p = p.with_suffix(".png")
         suffix = ".png"
