@@ -204,6 +204,62 @@ MACINTOSH: Palette = (
     (192, 192, 192),   (128, 128, 128),  (64, 64, 64),     (0, 0, 0),
 )
 
+
+# ---- 3.0 additions ------------------------------------------------------------
+
+def _hex_palette(*codes: str) -> Palette:
+    return tuple((int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)) for c in codes)  # type: ignore[return-value]
+
+
+# Sega Game Gear — a bright 16-color selection from its 4096-color space.
+GAMEGEAR: Palette = (
+    (0, 0, 0),         (34, 34, 34),     (85, 85, 85),     (255, 255, 255),
+    (170, 0, 0),       (255, 68, 68),    (255, 136, 0),    (255, 221, 68),
+    (0, 136, 0),       (68, 221, 68),    (0, 136, 170),    (68, 204, 255),
+    (34, 34, 170),     (136, 68, 221),   (221, 68, 187),   (255, 170, 204),
+)
+
+# Nintendo Virtual Boy — four intensities of red on black.
+VIRTUALBOY: Palette = ((0, 0, 0), (89, 0, 0), (173, 0, 0), (255, 0, 0))
+
+# Amstrad CPC — 16 of the 27 hardware colors.
+AMSTRAD_CPC: Palette = (
+    (0, 0, 0),         (0, 0, 128),      (0, 0, 255),      (128, 0, 0),
+    (128, 0, 128),     (128, 0, 255),    (255, 0, 0),      (255, 0, 128),
+    (255, 0, 255),     (0, 128, 0),      (0, 128, 128),    (0, 255, 0),
+    (128, 255, 0),     (255, 255, 0),    (128, 128, 128),  (255, 255, 255),
+)
+
+# UK Teletext / BBC Micro Mode 7 — the eight saturated primaries.
+TELETEXT: Palette = (
+    (0, 0, 0),         (255, 0, 0),      (0, 255, 0),      (255, 255, 0),
+    (0, 0, 255),       (255, 0, 255),    (0, 255, 255),    (255, 255, 255),
+)
+
+# DawnBringer 32 — the painterly companion to DB16.
+DB32: Palette = _hex_palette(
+    "000000", "222034", "45283c", "663931", "8f563b", "df7126", "d9a066", "eec39a",
+    "fbf236", "99e550", "6abe30", "37946e", "4b692f", "524b24", "323c39", "3f3f74",
+    "306082", "5b6ee1", "639bff", "5fcde4", "cbdbfc", "ffffff", "9badb7", "847e87",
+    "696a6a", "595652", "76428a", "ac3232", "d95763", "d77bba", "8f974a", "8a6f30",
+)
+
+# CGA Mode 4, palette 0 (high intensity): black, green, red, yellow.
+CGA0: Palette = ((0, 0, 0), (85, 255, 85), (255, 85, 85), (255, 255, 85))
+
+# Pure 1-bit (classic Macintosh / e-ink).
+ONE_BIT: Palette = ((0, 0, 0), (255, 255, 255))
+
+# Lospec community favourites.
+SLSO8: Palette = _hex_palette(
+    "0d2b45", "203c56", "544e68", "8d697a", "d08159", "ffaa5e", "ffd4a3", "ffecd6"
+)
+DEMICHROME: Palette = _hex_palette("211e20", "555568", "a0a08b", "e9efec")
+KIROKAZE_GB: Palette = _hex_palette("332c50", "46878f", "94e344", "e2f3e4")
+ICE_CREAM_GB: Palette = _hex_palette("7c3f58", "eb6b6f", "f9a875", "fff6d3")
+HOLLOW: Palette = _hex_palette("0f0f1b", "565a75", "c6b7be", "fafbf6")
+AYY4: Palette = _hex_palette("00303b", "ff7777", "ffce96", "f1f2da")
+
 # ---- Registry --------------------------------------------------------------
 
 PALETTES: Dict[str, Palette] = {
@@ -239,6 +295,22 @@ PALETTES: Dict[str, Palette] = {
     "endesga32": ENDESGA32,
     "endesga-32": ENDESGA32,  # alias
     "macintosh": MACINTOSH,
+    "gamegear": GAMEGEAR,
+    "game-gear": GAMEGEAR,  # alias
+    "virtualboy": VIRTUALBOY,
+    "virtual-boy": VIRTUALBOY,  # alias
+    "amstrad": AMSTRAD_CPC,
+    "cpc": AMSTRAD_CPC,  # alias
+    "teletext": TELETEXT,
+    "db32": DB32,
+    "cga0": CGA0,
+    "1bit": ONE_BIT,
+    "slso8": SLSO8,
+    "demichrome": DEMICHROME,
+    "kirokaze": KIROKAZE_GB,
+    "ice-cream-gb": ICE_CREAM_GB,
+    "hollow": HOLLOW,
+    "ayy4": AYY4,
 }
 
 

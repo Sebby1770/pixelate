@@ -19,7 +19,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 from pixelate.colorspace import lab_to_srgb, nearest_palette_indices, srgb_to_lab
-from pixelate.dithering import dither_image
+from pixelate.dithering import dither_indices
 from pixelate.palettes import RGB, Palette, get_palette
 
 PathLike = Union[str, Path]
@@ -27,6 +27,10 @@ ColorUsage = Tuple[RGB, int, float]  # color, pixel count, percentage
 
 # Stashed on the returned image so CLI --report uses the same auto palette
 PALETTE_INFO_KEY = "pixelate_palette"
+# Logical (pre-upscale) palette index map, used by SVG / JSON / C export
+INDICES_INFO_KEY = "pixelate_indices"
+# Attribute-clash summary when a hardware mode ran
+HARDWARE_INFO_KEY = "pixelate_hardware"
 
 
 def image_has_alpha(img: Image.Image) -> bool:
@@ -634,6 +638,16 @@ def pixelate_image(
     seed: Optional[int] = None,
     downscale: str = "box",
     distance: Optional[str] = None,
+    hardware: Optional[str] = None,
+    upscaler: str = "nearest",
+    outline: int = 0,
+    outline_color: Optional[Sequence[int]] = None,
+    grid: bool = False,
+    chromatic: int = 0,
+    color_bleed: float = 0.0,
+    curvature: float = 0.0,
+    cleanup: int = 0,
+    preset: Optional[str] = None,
 ) -> Image.Image:
     """
     Convert an image into retro pixel art.
@@ -698,6 +712,30 @@ def pixelate_image(
     bayer_size : int
         Bayer matrix size ``2``, ``4``, or ``8`` (default 4). Ignored
         unless *dither* is ``"bayer"``.
+    hardware : str, optional
+        Emulate a machine's attribute rules (``zx``, ``c64``, ``c64-multi``,
+        ``msx``, ``nes``). Overrides *palette* with the machine palette and
+        restricts every cell to its legal colors (color clash). See
+        :mod:`pixelate.hardware`.
+    upscaler : str
+        ``nearest`` (default), ``scale2x``, ``scale3x`` or ``scale4x``.
+    outline : int
+        Outline thickness in art pixels around the foreground (0 = off).
+    outline_color : RGB, optional
+        Outline color; default is the darkest palette color (palette-locked).
+    grid : bool
+        Draw a pixel grid over the upscaled art.
+    chromatic : int
+        Red/blue channel split in output pixels (0 = off).
+    color_bleed : float
+        NTSC chroma bleed strength 0–1 (0 = off).
+    curvature : float
+        CRT barrel curvature, e.g. ``0.06`` (0 = flat).
+    cleanup : int
+        Passes of orphan-pixel cleanup on the art grid (0 = off).
+    preset : str, optional
+        Named recipe from :mod:`pixelate.presets`; any argument you pass
+        that differs from its default overrides the preset.
 
     Returns
     -------
@@ -706,6 +744,17 @@ def pixelate_image(
         is stored on ``result.info["pixelate_palette"]``. Mode is RGBA when
         the source had transparency.
     """
+    if preset is not None:
+        from pixelate.presets import merge_preset
+        given = {k: v for k, v in locals().items() if k in _defaults()}
+        merged = merge_preset(preset, given, _defaults())
+        return pixelate_image(src, **merged)
+
+    hw_mode = None
+    if hardware is not None:
+        from pixelate.hardware import get_hardware_mode
+        hw_mode = get_hardware_mode(hardware)
+
     space = str(distance if distance is not None else colorspace).lower().strip()
     if space not in ("lab", "rgb", "ciede2000"):
         raise ValueError(
@@ -739,8 +788,16 @@ def pixelate_image(
     if posterize is not None:
         img = _posterize_image(img, posterize)
 
+    if hw_mode is not None and hw_mode.pixel_width > 1:
+        # Wide-pixel modes (C64 multicolor) quantize at half horizontal res.
+        narrow = max(1, round(img.size[0] / hw_mode.pixel_width))
+        img = img.resize((narrow, img.size[1]), Image.BOX)
+
     # --- Palette --------------------------------------------------------
-    if palette_file is not None:
+    hw_report = None
+    if hw_mode is not None:
+        palette_colors = tuple(hw_mode.palette)
+    elif palette_file is not None:
         palette_colors = resolve_palette(palette, palette_file=palette_file)
     elif isinstance(palette, str) and palette.lower().strip() == "auto":
         palette_colors = extract_palette(
@@ -753,34 +810,69 @@ def pixelate_image(
         (int(c[0]), int(c[1]), int(c[2])) for c in palette_colors
     )
 
-    # --- Quantize -------------------------------------------------------
-    palette_arr = np.array(palette_colors, dtype=np.float32)
-    arr = np.array(img, dtype=np.uint8)
-    quantized = dither_image(
-        arr.astype(np.float32),
-        palette_arr,
-        dither,
-        space=space,
-        serpentine=serpentine,
-        bayer_size=bayer_size,
-    )
+    # --- Quantize (palette indices at art resolution) -------------------
+    palette_arr = np.array(palette_colors, dtype=np.float64)
+    arr = np.asarray(img, dtype=np.float64)
+    if hw_mode is not None:
+        from pixelate.hardware import apply_hardware, clash_report
+        hw_result = apply_hardware(
+            arr, hw_mode, dither=dither, space=space,
+            serpentine=serpentine, bayer_size=bayer_size,
+        )
+        idx = hw_result.indices
+        hw_report = clash_report(hw_result)
+    else:
+        idx = dither_indices(
+            arr, palette_arr, dither, space=space,
+            serpentine=serpentine, bayer_size=bayer_size,
+        ).astype(np.int64)
 
-    out = Image.fromarray(quantized.astype(np.uint8), mode="RGB")
+    if cleanup:
+        from pixelate.effects import cleanup_orphans
+        idx = cleanup_orphans(idx, passes=int(cleanup))
+
+    if hw_mode is not None and hw_mode.pixel_width > 1:
+        idx = np.repeat(idx, hw_mode.pixel_width, axis=1)
+
+    if outline:
+        idx, palette_colors = _outline_indices(
+            idx, palette_colors, int(outline), outline_color, alpha
+        )
+        palette_arr = np.array(palette_colors, dtype=np.float64)
+
+    out = Image.fromarray(palette_arr[idx].astype(np.uint8), mode="RGB")
 
     # --- Upscale --------------------------------------------------------
     if upscale > 1:
-        new_size = (out.size[0] * upscale, out.size[1] * upscale)
-        out = out.resize(new_size, Image.NEAREST)
+        from pixelate.upscale import upscale_image
+        out = upscale_image(out, upscale, upscaler)
 
-    # --- Effects (CRT bloom first, then phosphor, then scanlines) ------
-    if crt or phosphor or scanlines:
-        from pixelate.effects import apply_crt, apply_phosphor, apply_scanlines
+    # --- Effects ----------------------------------------------------------
+    # grid → CRT bloom → chroma bleed → RGB split → phosphor → scanlines → curve
+    if grid and upscale > 1:
+        from pixelate.effects import apply_grid
+        out = apply_grid(out, upscale)
+    if crt or phosphor or scanlines or chromatic or color_bleed or curvature:
+        from pixelate.effects import (
+            apply_chromatic_aberration,
+            apply_color_bleed,
+            apply_crt,
+            apply_curvature,
+            apply_phosphor,
+            apply_scanlines,
+        )
         if crt:
             out = apply_crt(out)
+        if color_bleed:
+            out = apply_color_bleed(out, strength=float(color_bleed))
+        if chromatic:
+            out = apply_chromatic_aberration(out, int(chromatic))
         if phosphor:
             out = apply_phosphor(out)
         if scanlines:
             out = apply_scanlines(out)
+        if curvature:
+            out = apply_curvature(out, float(curvature))
 
     # --- Extra display scale (chunky nearest-neighbor) ------------------
     if scale > 1:
@@ -792,7 +884,56 @@ def pixelate_image(
         out.putalpha(alpha_final)
 
     out.info[PALETTE_INFO_KEY] = palette_colors
+    out.info[INDICES_INFO_KEY] = np.asarray(idx, dtype=np.int64)
+    if hw_report is not None:
+        out.info[HARDWARE_INFO_KEY] = hw_report
     return out
+
+
+_DEFAULTS_CACHE: Dict[str, object] = {}
+
+
+def _defaults() -> Dict[str, object]:
+    """Default values of :func:`pixelate_image` keyword arguments."""
+    if not _DEFAULTS_CACHE:
+        import inspect
+        for name, param in inspect.signature(pixelate_image).parameters.items():
+            if name in ("src", "preset"):
+                continue
+            _DEFAULTS_CACHE[name] = param.default
+    return _DEFAULTS_CACHE
+
+
+def _outline_indices(
+    idx: np.ndarray,
+    palette_colors: Tuple[RGB, ...],
+    thickness: int,
+    color: Optional[Sequence[int]],
+    alpha: Optional[Image.Image],
+) -> Tuple[np.ndarray, Tuple[RGB, ...]]:
+    """Paint a palette-locked outline around the foreground of an index map."""
+    from pixelate.effects import _dilate
+
+    h, w = idx.shape
+    if alpha is not None:
+        foreground = np.asarray(alpha.resize((w, h), Image.NEAREST)) > 127
+    else:
+        border = np.concatenate([idx[0], idx[-1], idx[:, 0], idx[:, -1]])
+        bg = np.bincount(border).argmax()
+        foreground = idx != bg
+    ring = _dilate(foreground, thickness) & ~foreground
+    pal = list(palette_colors)
+    if color is None:
+        luma = [0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] for c in pal]
+        ink = int(np.argmin(luma))
+    else:
+        rgb = (int(color[0]), int(color[1]), int(color[2]))
+        if rgb not in pal:
+            pal.append(rgb)
+        ink = pal.index(rgb)
+    out = idx.copy()
+    out[ring] = ink
+    return out, tuple(pal)
 
 
 def save_image(
@@ -815,6 +956,19 @@ def save_image(
     """
     p = Path(path)
     suffix = p.suffix.lower()
+    from pixelate.export import EXPORT_SUFFIXES, export_indexed
+    if suffix in EXPORT_SUFFIXES:
+        pal = palette or img.info.get(PALETTE_INFO_KEY)
+        idx = img.info.get(INDICES_INFO_KEY)
+        if pal is None:
+            pal = collect_working_colors([img])
+        if idx is None:
+            idx = np.asarray(image_to_indexed(img, pal))
+        transparent = None
+        if img.mode == "RGBA":
+            a = np.asarray(img.getchannel("A").resize((idx.shape[1], idx.shape[0]), Image.NEAREST))
+            transparent = a < 128
+        return export_indexed(idx, pal, p, transparent=transparent)
     if suffix in {".jpg", ".jpeg"} and not allow_jpeg:
         p = p.with_suffix(".png")
         suffix = ".png"
@@ -832,14 +986,12 @@ def save_image(
             to_save = image_to_indexed(img, pal_tuples)
 
     # Drop custom info keys that some encoders reject
-    info_pal = None
-    if PALETTE_INFO_KEY in getattr(to_save, "info", {}):
-        info_pal = to_save.info.pop(PALETTE_INFO_KEY, None)
+    info = getattr(to_save, "info", {})
+    stashed = {k: info.pop(k) for k in list(info) if str(k).startswith("pixelate_")}
     try:
         to_save.save(p)
     finally:
-        if info_pal is not None:
-            to_save.info[PALETTE_INFO_KEY] = info_pal
+        info.update(stashed)
     return p
 
 
