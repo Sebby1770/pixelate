@@ -112,9 +112,9 @@ def collect_working_colors(
 
 
 _DOWNSCALE_FILTERS = {
-    "box": Image.BOX,
-    "lanczos": Image.LANCZOS,
-    "nearest": Image.NEAREST,
+    "box": Image.Resampling.BOX,
+    "lanczos": Image.Resampling.LANCZOS,
+    "nearest": Image.Resampling.NEAREST,
 }
 
 
@@ -496,7 +496,7 @@ def nearest_scale(img: Image.Image, factor: int) -> Image.Image:
     if factor == 1:
         return img
     w, h = img.size
-    return img.resize((w * factor, h * factor), Image.NEAREST)
+    return img.resize((w * factor, h * factor), Image.Resampling.NEAREST)
 
 
 def compare_palettes(
@@ -521,7 +521,8 @@ def compare_palettes(
     src :
         Source image path or PIL Image.
     palettes :
-        Sequence of palette names or RGB sequences.
+        Sequence of palette names, RGB sequences, or ``"hw:<mode>"`` entries
+        (e.g. ``"hw:zx"``) to compare hardware attribute modes.
     pixel_size, dither, upscale, saturation :
         Forwarded to :func:`pixelate_image`.
     cols :
@@ -547,7 +548,18 @@ def compare_palettes(
     names: List[str] = []
     tiles: List[Image.Image] = []
     for p in palettes:
-        if isinstance(p, str):
+        if isinstance(p, str) and p.lower().startswith("hw:"):
+            names.append(p)
+            tile = pixelate_image(
+                src,
+                hardware=p[3:],
+                pixel_size=pixel_size,
+                dither=dither,
+                upscale=upscale,
+                saturation=saturation,
+                **kwargs,
+            )
+        elif isinstance(p, str):
             names.append(p)
             tile = pixelate_image(
                 src,
@@ -715,8 +727,9 @@ def pixelate_image(
     hardware : str, optional
         Emulate a machine's attribute rules (``zx``, ``c64``, ``c64-multi``,
         ``msx``, ``nes``). Overrides *palette* with the machine palette and
-        restricts every cell to its legal colors (color clash). See
-        :mod:`pixelate.hardware`.
+        restricts every cell to its legal colors (color clash). When
+        *pixel_size* is left at its default it becomes the machine's native
+        long side (256 for ZX/MSX/NES, 320 for C64). See :mod:`pixelate.hardware`.
     upscaler : str
         ``nearest`` (default), ``scale2x``, ``scale3x`` or ``scale4x``.
     outline : int
@@ -754,6 +767,8 @@ def pixelate_image(
     if hardware is not None:
         from pixelate.hardware import get_hardware_mode
         hw_mode = get_hardware_mode(hardware)
+        if pixel_size == _defaults()["pixel_size"]:
+            pixel_size = hw_mode.pixel_size  # native resolution unless asked otherwise
 
     space = str(distance if distance is not None else colorspace).lower().strip()
     if space not in ("lab", "rgb", "ciede2000"):
@@ -762,6 +777,7 @@ def pixelate_image(
         )
 
     # --- Load -----------------------------------------------------------
+    img: Image.Image
     if isinstance(src, (str, Path)):
         img = Image.open(src)
     else:
@@ -791,7 +807,7 @@ def pixelate_image(
     if hw_mode is not None and hw_mode.pixel_width > 1:
         # Wide-pixel modes (C64 multicolor) quantize at half horizontal res.
         narrow = max(1, round(img.size[0] / hw_mode.pixel_width))
-        img = img.resize((narrow, img.size[1]), Image.BOX)
+        img = img.resize((narrow, img.size[1]), Image.Resampling.BOX)
 
     # --- Palette --------------------------------------------------------
     hw_report = None
@@ -879,7 +895,7 @@ def pixelate_image(
         out = nearest_scale(out, scale)
 
     if alpha is not None:
-        alpha_final = alpha.resize(out.size, Image.NEAREST)
+        alpha_final = alpha.resize(out.size, Image.Resampling.NEAREST)
         out = out.convert("RGBA")
         out.putalpha(alpha_final)
 
@@ -916,7 +932,7 @@ def _outline_indices(
 
     h, w = idx.shape
     if alpha is not None:
-        foreground = np.asarray(alpha.resize((w, h), Image.NEAREST)) > 127
+        foreground = np.asarray(alpha.resize((w, h), Image.Resampling.NEAREST)) > 127
     else:
         border = np.concatenate([idx[0], idx[-1], idx[:, 0], idx[:, -1]])
         bg = np.bincount(border).argmax()
@@ -966,7 +982,7 @@ def save_image(
             idx = np.asarray(image_to_indexed(img, pal))
         transparent = None
         if img.mode == "RGBA":
-            a = np.asarray(img.getchannel("A").resize((idx.shape[1], idx.shape[0]), Image.NEAREST))
+            a = np.asarray(img.getchannel("A").resize((idx.shape[1], idx.shape[0]), Image.Resampling.NEAREST))
             transparent = a < 128
         return export_indexed(idx, pal, p, transparent=transparent)
     if suffix in {".jpg", ".jpeg"} and not allow_jpeg:

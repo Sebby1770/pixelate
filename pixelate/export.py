@@ -23,7 +23,7 @@ EXPORT_SUFFIXES = {".svg": "svg", ".json": "json", ".h": "c", ".c": "c"}
 
 
 def _hex(c: RGB) -> str:
-    return "#{:02x}{:02x}{:02x}".format(int(c[0]), int(c[1]), int(c[2]))
+    return f"#{int(c[0]):02x}{int(c[1]):02x}{int(c[2]):02x}"
 
 
 def to_svg(

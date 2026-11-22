@@ -8,7 +8,6 @@ from PIL import Image
 from pixelate.core import extract_palette, pixelate_image
 from pixelate.palettes import get_palette
 
-
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 SOURCE = ASSETS / "source.png"
 
@@ -168,7 +167,7 @@ def test_extract_palette_seed_1_vs_2_may_differ():
         [
             (x * 2).astype(np.uint8),
             (y * 2).astype(np.uint8),
-            ((x + y)).astype(np.uint8),
+            (x + y).astype(np.uint8),
         ],
         axis=-1,
     )

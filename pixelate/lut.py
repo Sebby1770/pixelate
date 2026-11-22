@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from array import array
 from functools import lru_cache
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Union
 
 import numpy as np
 
@@ -62,7 +62,7 @@ def grid_lab(bits: int = DEFAULT_BITS) -> np.ndarray:
 
 
 @lru_cache(maxsize=2)
-def grid_lab_flat(bits: int = DEFAULT_BITS) -> "array[float]":
+def grid_lab_flat(bits: int = DEFAULT_BITS) -> array[float]:
     """Flat ``array('d')`` of cell Lab triples for fast scalar access."""
     out = array("d")
     out.frombytes(np.ascontiguousarray(grid_lab(bits), dtype=np.float64).tobytes())
@@ -119,7 +119,7 @@ class PaletteLUT:
 
     def __init__(
         self,
-        palette: Sequence[Sequence[float]],
+        palette: Union[np.ndarray, Sequence[Sequence[float]]],
         space: str = "lab",
         bits: int = DEFAULT_BITS,
     ) -> None:
@@ -159,7 +159,7 @@ class PaletteLUT:
 
 
 def palette_lut(
-    palette: Sequence[Sequence[float]],
+    palette: Union[np.ndarray, Sequence[Sequence[float]]],
     space: str = "lab",
     bits: int = DEFAULT_BITS,
 ) -> PaletteLUT:

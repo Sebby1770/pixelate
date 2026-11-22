@@ -83,7 +83,7 @@ def upscale_image(img: Image.Image, factor: int, method: str = "nearest") -> Ima
     if factor == 1:
         return img
     if key == "nearest":
-        return img.resize((img.width * factor, img.height * factor), Image.NEAREST)
+        return img.resize((img.width * factor, img.height * factor), Image.Resampling.NEAREST)
 
     mode = img.mode
     arr = np.asarray(img.convert("RGBA" if mode in ("RGBA", "LA", "PA") else "RGB"))
@@ -99,5 +99,5 @@ def upscale_image(img: Image.Image, factor: int, method: str = "nearest") -> Ima
         remaining //= 3
     out = Image.fromarray(arr)
     if remaining > 1:
-        out = out.resize((out.width * remaining, out.height * remaining), Image.NEAREST)
+        out = out.resize((out.width * remaining, out.height * remaining), Image.Resampling.NEAREST)
     return out

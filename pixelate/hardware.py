@@ -367,7 +367,7 @@ class HardwareResult:
 
 def apply_hardware(
     image: np.ndarray,
-    mode: "HardwareMode | str",
+    mode: HardwareMode | str,
     dither: str = "none",
     space: str = "lab",
     serpentine: bool = True,

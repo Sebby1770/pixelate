@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import functools
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import click
+from click.core import ParameterSource
+from PIL import Image
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
@@ -13,6 +16,7 @@ from pixelate import __version__
 from pixelate.animation import is_animated, pixelate_animation
 from pixelate.ascii_art import RAMPS, image_to_ascii, save_ascii
 from pixelate.core import (
+    HARDWARE_INFO_KEY,
     PALETTE_INFO_KEY,
     collect_images,
     color_usage_report,
@@ -23,10 +27,14 @@ from pixelate.core import (
     resolve_palette,
     save_image,
 )
-from pixelate.dithering import DITHER_ALGORITHMS
+from pixelate.dithering import DITHER_ALGORITHMS, DITHER_DESCRIPTIONS
+from pixelate.export import swatch_sheet
+from pixelate.hardware import HARDWARE_MODES, get_hardware_mode
 from pixelate.palette_io import load_palette_file, register_palette, save_gpl, save_hex
 from pixelate.palettes import PALETTES, get_palette, list_palettes
+from pixelate.presets import PRESETS, get_preset, load_presets_file
 from pixelate.ui import console, info_panel, print_banner, print_palette_table
+from pixelate.upscale import UPSCALERS
 
 
 def _palette_choices() -> list[str]:
@@ -163,14 +171,169 @@ def _common_convert_options(fn):
             is_flag=True,
             help="Print color-usage report (palette color pixel counts).",
         ),
+        click.option(
+            "--preset",
+            default=None,
+            metavar="NAME",
+            help="Named recipe (see `pixelate presets`). Flags you type win.",
+        ),
+        click.option(
+            "--presets-file",
+            type=click.Path(exists=True, dir_okay=False, path_type=Path),
+            default=None,
+            help="JSON file of extra presets {name: {option: value}}.",
+        ),
+        click.option(
+            "--hardware",
+            type=click.Choice(_hardware_choices(), case_sensitive=False),
+            default=None,
+            help="Emulate a machine's attribute clash (see `pixelate hardware`).",
+        ),
+        click.option(
+            "--upscaler",
+            type=click.Choice(list(UPSCALERS), case_sensitive=False),
+            default="nearest",
+            show_default=True,
+            help="Upscale filter: nearest, or palette-locked Scale2x/3x/4x.",
+        ),
+        click.option(
+            "--outline",
+            type=click.IntRange(0, 8),
+            default=0,
+            show_default=True,
+            help="Outline thickness around the foreground (art pixels).",
+        ),
+        click.option(
+            "--outline-color",
+            default=None,
+            metavar="HEX",
+            help="Outline color (default: darkest palette color).",
+        ),
+        click.option("--grid", is_flag=True, help="Draw a pixel grid over the art."),
+        click.option(
+            "--chromatic",
+            type=click.IntRange(0, 16),
+            default=0,
+            show_default=True,
+            help="Red/blue channel split in output pixels.",
+        ),
+        click.option(
+            "--color-bleed",
+            type=click.FloatRange(0.0, 1.0),
+            default=0.0,
+            show_default=True,
+            help="NTSC chroma bleed strength.",
+        ),
+        click.option(
+            "--curvature",
+            type=click.FloatRange(0.0, 0.5),
+            default=0.0,
+            show_default=True,
+            help="CRT barrel curvature (try 0.06).",
+        ),
+        click.option(
+            "--cleanup",
+            type=click.IntRange(0, 4),
+            default=0,
+            show_default=True,
+            help="Orphan-pixel cleanup passes on the art grid.",
+        ),
     ]
+    fn = _studio_options(fn)
     for opt in reversed(options):
         fn = opt(fn)
     return fn
 
 
+_STUDIO_KEYS = (
+    "preset", "presets_file", "hardware", "upscaler", "outline", "outline_color",
+    "grid", "chromatic", "color_bleed", "curvature", "cleanup",
+)
+_EXTRA_META = "pixelate_extra"
+_PRESET_META = "pixelate_preset"
+
+
+def _hardware_choices() -> list[str]:
+    names = list(HARDWARE_MODES)
+    for mode in HARDWARE_MODES.values():
+        names.extend(mode.aliases)
+    return names
+
+
+def _parse_hex(value: str) -> tuple:
+    text = value.strip().lstrip("#")
+    if len(text) == 3:
+        text = "".join(ch * 2 for ch in text)
+    if len(text) != 6:
+        raise click.BadParameter(f"'{value}' is not a #RRGGBB color", param_hint="--outline-color")
+    try:
+        return tuple(int(text[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError as exc:
+        raise click.BadParameter(f"'{value}' is not a #RRGGBB color", param_hint="--outline-color") from exc
+
+
+def _studio_options(fn):
+    """Pop 3.0 options into ctx.meta and apply --preset to untouched flags."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kw):
+        ctx = click.get_current_context()
+        extras: Dict[str, Any] = {k: kw.pop(k) for k in _STUDIO_KEYS if k in kw}
+        presets_file = extras.pop("presets_file", None)
+        if presets_file is not None:
+            try:
+                load_presets_file(presets_file)
+            except (ValueError, OSError) as exc:
+                raise click.ClickException(f"Could not load presets: {exc}") from exc
+        preset_name = extras.pop("preset", None)
+        if preset_name:
+            try:
+                preset = get_preset(preset_name)
+            except KeyError as exc:
+                raise click.ClickException(str(exc.args[0])) from exc
+            for key, value in preset.options.items():
+                source = ctx.get_parameter_source(key)
+                if source not in (ParameterSource.DEFAULT, ParameterSource.DEFAULT_MAP):
+                    continue  # typed on the command line (or not on this command)
+                if key in kw:
+                    kw[key] = str(value) if key == "bayer_size" else value
+                elif key in extras:
+                    extras[key] = value
+            ctx.meta[_PRESET_META] = preset
+        if extras.get("outline_color"):
+            extras["outline_color"] = _parse_hex(str(extras["outline_color"]))
+        if (
+            extras.get("hardware")
+            and "pixel_size" in kw
+            and ctx.get_parameter_source("pixel_size") in (ParameterSource.DEFAULT, ParameterSource.DEFAULT_MAP)
+            and not (ctx.meta.get(_PRESET_META) and "pixel_size" in ctx.meta[_PRESET_META].options)
+        ):
+            kw["pixel_size"] = get_hardware_mode(extras["hardware"]).pixel_size
+        ctx.meta[_EXTRA_META] = extras
+        return fn(*args, **kw)
+
+    return wrapper
+
+
+def _studio_summary(extras: Dict[str, Any]) -> str:
+    bits = []
+    if extras.get("hardware"):
+        bits.append(f"hardware={get_hardware_mode(extras['hardware']).name}")
+    if extras.get("upscaler", "nearest") != "nearest":
+        bits.append(f"upscaler={extras['upscaler']}")
+    for key in ("outline", "chromatic", "color_bleed", "curvature", "cleanup"):
+        if extras.get(key):
+            bits.append(f"{key.replace('_', '-')}={extras[key]}")
+    if extras.get("grid"):
+        bits.append("grid")
+    return " ".join(bits)
+
+
 def _validate_palette_name(palette: str, palette_file: Optional[Path]) -> None:
     if palette_file is not None:
+        return
+    ctx = click.get_current_context(silent=True)
+    if ctx is not None and ctx.meta.get(_EXTRA_META, {}).get("hardware"):
         return
     if palette.lower().strip() == "auto":
         return
@@ -191,6 +354,11 @@ def _palette_label(
     palette_file: Optional[Path],
     colors: int = 16,
 ) -> str:
+    ctx = click.get_current_context(silent=True)
+    hw = ctx.meta.get(_EXTRA_META, {}).get("hardware") if ctx is not None else None
+    if hw:
+        mode = get_hardware_mode(hw)
+        return f"hw:{mode.name} — {mode.title} ({len(mode.palette)} colors, {mode.colors_per_cell}/cell)"
     if palette_file is not None:
         loaded = load_palette_file(palette_file)
         return f"file:{palette_file.name} ({len(loaded)} colors)"
@@ -269,7 +437,27 @@ def _convert_kwargs(
         bayer_size=int(bayer_size),
         seed=seed,
         downscale=downscale,
+        **_studio_extras(),
     )
+
+
+def _studio_extras() -> Dict[str, Any]:
+    """3.0 options captured by :func:`_studio_options` (printed once)."""
+    ctx = click.get_current_context(silent=True)
+    if ctx is None:
+        return {}
+    extras = dict(ctx.meta.get(_EXTRA_META, {}))
+    if not ctx.meta.get("pixelate_announced"):
+        ctx.meta["pixelate_announced"] = True
+        preset = ctx.meta.get(_PRESET_META)
+        if preset is not None:
+            console.print(
+                f"[cyan]Preset:[/cyan]    [yellow]{preset.name}[/yellow] [dim]— {preset.description}[/dim]"
+            )
+        summary = _studio_summary(extras)
+        if summary:
+            console.print(f"[cyan]Studio:[/cyan]    {summary}")
+    return extras
 
 
 def _picklable_convert_kwargs(kwargs: dict) -> dict:
@@ -413,11 +601,13 @@ def convert_cmd(
     ) as progress:
         task = progress.add_task("[green]Pixelating...", total=None)
         if animated:
-            result = pixelate_animation(
+            first = pixelate_animation(
                 input_path,
                 output=output_path,
                 **kwargs,
             )
+            assert isinstance(first, Image.Image)
+            result = first
             size_label = f"{result.size[0]}×{result.size[1]}"
             saved = output_path
         else:
@@ -434,6 +624,13 @@ def convert_cmd(
         f"[bold green]✓[/bold green] Saved: [cyan]{saved}[/cyan]  "
         f"[dim]({size_label}{' animated' if animated else ''})[/dim]"
     )
+
+    clash = result.info.get(HARDWARE_INFO_KEY) if not animated else None
+    if clash:
+        console.print(
+            f"[cyan]Clash:[/cyan]     {clash['mode']} · {clash['cells']} cells · "
+            f"{clash['distinct_cell_sets']} distinct cell sets · {clash['colors_used']} colors used"
+        )
 
     if report and not animated:
         pal = result.info.get(PALETTE_INFO_KEY)
@@ -548,7 +745,7 @@ def batch_cmd(
                     _batch_convert_one(payload)
                     ok += 1
                 except Exception as exc:  # noqa: BLE001 — report and continue batch
-                    errors.append(f"{Path(payload['src']).name}: {exc}")
+                    errors.append(f"{Path(str(payload['src'])).name}: {exc}")
                 progress.advance(task)
         else:
             from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -558,7 +755,7 @@ def batch_cmd(
                 n_err: list[str] = []
                 with executor:
                     futures = {
-                        executor.submit(_batch_convert_one, p): Path(p["src"]).name
+                        executor.submit(_batch_convert_one, p): Path(str(p["src"])).name
                         for p in payloads
                     }
                     for fut in as_completed(futures):
@@ -779,6 +976,12 @@ def compare_cmd(
         raise click.ClickException("No palettes specified. Use --palettes gameboy,nes,...")
 
     for name in names:
+        if name.lower().startswith("hw:"):
+            try:
+                get_hardware_mode(name[3:])
+            except KeyError as exc:
+                raise click.ClickException(str(exc.args[0])) from exc
+            continue
         if name.lower() not in PALETTES and name.lower() != "auto":
             p = Path(name)
             if not p.is_file():
@@ -1006,3 +1209,90 @@ def preview_cmd(palette_name: str) -> None:
 
 if __name__ == "__main__":
     cli()
+
+
+@cli.command("hardware")
+def hardware_cmd() -> None:
+    """List hardware modes (attribute-clash emulation)."""
+    print_banner()
+    table = Table(title="[bold cyan]Hardware modes[/bold cyan]", border_style="green",
+                  header_style="bold magenta")
+    table.add_column("Name", style="yellow")
+    table.add_column("Machine", style="cyan")
+    table.add_column("Cell", justify="center")
+    table.add_column("Colors/cell", justify="center")
+    table.add_column("Native", justify="center")
+    table.add_column("Rules", style="white")
+    for mode in HARDWARE_MODES.values():
+        aliases = f" [dim]({', '.join(mode.aliases)})[/dim]" if mode.aliases else ""
+        table.add_row(
+            mode.name + aliases, mode.title, f"{mode.cell[0]}×{mode.cell[1]}",
+            str(mode.colors_per_cell), f"{mode.native[0]}×{mode.native[1]}", mode.notes,
+        )
+    console.print(table)
+    console.print("[dim]pixelate convert photo.jpg --hardware zx --pixel-size 256 --dither pattern[/dim]")
+
+
+@cli.command("presets")
+@click.option("--file", "presets_file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None, help="Also load presets from this JSON file.")
+def presets_cmd(presets_file: Optional[Path]) -> None:
+    """List named presets."""
+    print_banner()
+    if presets_file is not None:
+        try:
+            load_presets_file(presets_file)
+        except (ValueError, OSError) as exc:
+            raise click.ClickException(f"Could not load presets: {exc}") from exc
+    table = Table(title="[bold cyan]Presets[/bold cyan]", border_style="green",
+                  header_style="bold magenta")
+    table.add_column("Name", style="yellow")
+    table.add_column("Look", style="white")
+    table.add_column("Options", style="dim")
+    for preset in PRESETS.values():
+        opts = " ".join(f"{k}={v}" for k, v in preset.options.items())
+        table.add_row(preset.name, preset.description, opts)
+    console.print(table)
+    console.print("[dim]pixelate convert photo.jpg --preset zx-loading-screen[/dim]")
+
+
+@cli.command("dithers")
+def dithers_cmd() -> None:
+    """List dithering algorithms."""
+    print_banner()
+    table = Table(title="[bold cyan]Dithers[/bold cyan]", border_style="green",
+                  header_style="bold magenta")
+    table.add_column("Name", style="yellow")
+    table.add_column("What it does", style="white")
+    for name, desc in DITHER_DESCRIPTIONS.items():
+        table.add_row(name, desc)
+    console.print(table)
+
+
+@cli.command("swatches")
+@click.argument("palette_name")
+@click.option("-o", "--output", "output_path", type=click.Path(dir_okay=False, path_type=Path),
+              default=None, help="Output PNG (default: <palette>_swatches.png).")
+@click.option("--cols", type=click.IntRange(1, 64), default=8, show_default=True)
+@click.option("--size", "swatch", type=click.IntRange(8, 256), default=48, show_default=True,
+              help="Swatch size in pixels.")
+def swatches_cmd(palette_name: str, output_path: Optional[Path], cols: int, swatch: int) -> None:
+    """Render a palette (name, .gpl/.hex file, or hw:MODE) as a swatch sheet."""
+    if palette_name.lower().startswith("hw:"):
+        try:
+            mode = get_hardware_mode(palette_name[3:])
+        except KeyError as exc:
+            raise click.ClickException(str(exc.args[0])) from exc
+        colors, title = list(mode.palette), mode.title
+    else:
+        try:
+            colors, title = list(resolve_palette(palette_name)), palette_name
+        except (KeyError, ValueError, OSError) as exc:
+            raise click.ClickException(str(exc.args[0] if exc.args else exc)) from exc
+    sheet = swatch_sheet(colors, cols=cols, swatch=swatch, title=f"{title} · {len(colors)} colors")
+    if output_path is None:
+        safe = Path(palette_name).stem.replace(":", "-")
+        output_path = Path(f"{safe}_swatches.png")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(output_path)
+    console.print(f"[bold green]✓[/bold green] Saved: [cyan]{output_path}[/cyan]  [dim]({sheet.size[0]}×{sheet.size[1]})[/dim]")

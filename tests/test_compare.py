@@ -7,7 +7,6 @@ from PIL import Image
 
 from pixelate.core import compare_palettes, save_image
 
-
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 SOURCE = ASSETS / "source.png"
 
@@ -65,7 +64,7 @@ def test_compare_palettes_empty_raises():
     src = _make_test_image()
     try:
         compare_palettes(src, [])
-        assert False, "expected ValueError"
+        raise AssertionError("expected ValueError")
     except ValueError:
         pass
 

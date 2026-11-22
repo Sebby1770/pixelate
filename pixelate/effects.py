@@ -137,7 +137,7 @@ def apply_outline(
     img: Image.Image,
     color: RGBTuple = (16, 16, 16),
     thickness: int = 1,
-    alpha: "Image.Image | None" = None,
+    alpha: Image.Image | None = None,
 ) -> Image.Image:
     """
     Draw a solid outline around the foreground sprite.
@@ -151,7 +151,7 @@ def apply_outline(
         return img
     arr = np.array(img.convert("RGB"), dtype=np.uint8)
     if alpha is not None:
-        foreground = np.asarray(alpha.resize(img.size, Image.NEAREST)) > 127
+        foreground = np.asarray(alpha.resize(img.size, Image.Resampling.NEAREST)) > 127
     else:
         foreground = ~_background_mask(arr)
     outline = _dilate(foreground, thickness) & ~foreground
