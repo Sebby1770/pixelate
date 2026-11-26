@@ -8,7 +8,8 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # ubuntu-24.04: the newer ubuntu-latest image has no Python 3.9 build.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
