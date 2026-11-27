@@ -75,6 +75,9 @@ def build() -> dict:
                 "maxSets": m.max_sets,
                 "groups": [list(g) for g in m.groups],
                 "pixelWidth": m.pixel_width,
+                "kind": m.kind,
+                "bits": m.bits,
+                "subPalettes": m.sub_palettes,
                 "native": list(m.native),
                 "notes": m.notes,
             }

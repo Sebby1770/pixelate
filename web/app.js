@@ -216,7 +216,12 @@
     renderSwatches(res);
     const s = res.stats;
     let text = `${img.width}×${img.height} · art ${res.logicalWidth}×${res.logicalHeight} · ${s.colorsUsed}/${s.paletteSize} colors · ${s.ms} ms`;
-    if (s.clash) text += ` · ${s.clash.mode}: ${s.clash.cells} cells, ${s.clash.distinctCellSets} cell sets`;
+    if (s.clash) {
+      const c = s.clash;
+      if (c.modifiedPixels != null) text += ` · ${c.mode}: ${c.baseColors} base colors, ${c.modifiedPixels}% hold-and-modify`;
+      else if (c.subPalettes != null) text += ` · ${c.mode}: ${c.subPalettes} sub-palettes over ${c.cells} tiles`;
+      else text += ` · ${c.mode}: ${c.cells} cells, ${c.distinctCellSets} cell sets`;
+    }
     if (camStream) text = "● live · " + text;
     els.status.textContent = text;
   }

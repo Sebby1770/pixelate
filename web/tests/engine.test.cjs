@@ -199,3 +199,25 @@ test("auto palette and exporters", () => {
   assert.match(E.toGPL(res.palette, "x"), /^GIMP Palette/);
   assert.equal(E.toHEX(res.palette).trim().split("\n").length, res.palette.length);
 });
+
+test("tile-palette modes and Amiga HAM6 obey their rules", () => {
+  const w = 48, h = 32, rgb = gradient(w, h);
+  for (const name of ["gbc", "megadrive", "snes"]) {
+    const mode = DATA.hardware[name];
+    const res = E.applyHardware(rgb, w, h, mode, { ...DEFAULT_OPTS, dither: "floyd" });
+    const lv = (1 << mode.bits) - 1, snap = (v) => Math.round((Math.round((v * lv) / 255) * 255) / lv);
+    for (const c of res.palette) for (const v of c) assert.equal(snap(v), v, name);
+    assert.ok(res.report.subPalettes <= mode.subPalettes, name);
+    for (const cell of cellColors(res.indices, w, h, 8, 8)) assert.ok(cell.size <= mode.perCell + mode.shared, name);
+  }
+  const ham = E.applyHardware(rgb, w, h, DATA.hardware["amiga-ham"], { ...DEFAULT_OPTS, dither: "none" });
+  assert.ok(ham.report.baseColors <= 16);
+  const px = (x, y) => ham.palette[ham.indices[y * w + x]];
+  for (let y = 0; y < h; y++)
+    for (let x = 1; x < w; x++) {
+      const a = px(x, y), b = px(x - 1, y);
+      a.forEach((v) => assert.equal(v % 17, 0));
+      const diff = a.filter((v, i) => v !== b[i]).length;
+      assert.ok(diff <= 1 || ham.report.baseColors > 0);
+    }
+});

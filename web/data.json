@@ -5236,6 +5236,9 @@
     ]
    ],
    "pixelWidth": 1,
+   "kind": "cells",
+   "bits": 8,
+   "subPalettes": 0,
    "native": [
     256,
     192
@@ -5271,6 +5274,9 @@
    "maxSets": null,
    "groups": [],
    "pixelWidth": 1,
+   "kind": "cells",
+   "bits": 8,
+   "subPalettes": 0,
    "native": [
     320,
     200
@@ -5306,6 +5312,9 @@
    "maxSets": null,
    "groups": [],
    "pixelWidth": 2,
+   "kind": "cells",
+   "bits": 8,
+   "subPalettes": 0,
    "native": [
     320,
     200
@@ -5340,6 +5349,9 @@
    "maxSets": null,
    "groups": [],
    "pixelWidth": 1,
+   "kind": "cells",
+   "bits": 8,
+   "subPalettes": 0,
    "native": [
     256,
     192
@@ -5375,11 +5387,98 @@
    "maxSets": 4,
    "groups": [],
    "pixelWidth": 1,
+   "kind": "cells",
+   "bits": 8,
+   "subPalettes": 0,
    "native": [
     256,
     240
    ],
    "notes": "universal background + one of four 3-color sub-palettes per 16x16 area"
+  },
+  "gbc": {
+   "title": "Game Boy Color",
+   "palette": [],
+   "cell": [
+    8,
+    8
+   ],
+   "perCell": 4,
+   "shared": 0,
+   "maxSets": null,
+   "groups": [],
+   "pixelWidth": 1,
+   "kind": "tiled",
+   "bits": 5,
+   "subPalettes": 8,
+   "native": [
+    160,
+    144
+   ],
+   "notes": "8 generated 4-colour sub-palettes (RGB555), one per 8x8 tile"
+  },
+  "megadrive": {
+   "title": "Sega Mega Drive / Genesis",
+   "palette": [],
+   "cell": [
+    8,
+    8
+   ],
+   "perCell": 15,
+   "shared": 1,
+   "maxSets": null,
+   "groups": [],
+   "pixelWidth": 1,
+   "kind": "tiled",
+   "bits": 3,
+   "subPalettes": 4,
+   "native": [
+    320,
+    224
+   ],
+   "notes": "4 generated 16-colour sub-palettes from 512 colours (RGB333), shared backdrop"
+  },
+  "snes": {
+   "title": "Super Nintendo",
+   "palette": [],
+   "cell": [
+    8,
+    8
+   ],
+   "perCell": 15,
+   "shared": 1,
+   "maxSets": null,
+   "groups": [],
+   "pixelWidth": 1,
+   "kind": "tiled",
+   "bits": 5,
+   "subPalettes": 8,
+   "native": [
+    256,
+    224
+   ],
+   "notes": "8 generated 16-colour sub-palettes (RGB555), shared backdrop"
+  },
+  "amiga-ham": {
+   "title": "Amiga HAM6",
+   "palette": [],
+   "cell": [
+    1,
+    1
+   ],
+   "perCell": 1,
+   "shared": 0,
+   "maxSets": null,
+   "groups": [],
+   "pixelWidth": 1,
+   "kind": "ham",
+   "bits": 4,
+   "subPalettes": 0,
+   "native": [
+    320,
+    256
+   ],
+   "notes": "16 base colours + hold-and-modify one RGB channel (4096 colours)"
   }
  },
  "presets": {

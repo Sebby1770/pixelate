@@ -837,6 +837,9 @@ def pixelate_image(
         )
         idx = hw_result.indices
         hw_report = clash_report(hw_result)
+        if hw_result.palette is not None:  # tile-palette / HAM modes
+            palette_colors = tuple(hw_result.palette)
+            palette_arr = np.array(palette_colors, dtype=np.float64)
     else:
         idx = dither_indices(
             arr, palette_arr, dither, space=space,

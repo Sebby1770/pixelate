@@ -551,6 +551,167 @@
     }
     return { sets: sets, K: K, cols: cols, rows: rows, shared: bestRun.bg == null ? [] : [bestRun.bg] };
   }
+  // ---------------------------------------- generated palettes (tiled, HAM)
+  function snapDepth(v, bits) {
+    var lv = (1 << bits) - 1;
+    return Math.round(Math.round(clamp255(v) * lv / 255) * 255 / lv);
+  }
+  function groupPalette(ints, n, count, bits, seed) {
+    var out = [], seen = new Set();
+    extractPalette(ints, n, count, seed).forEach(function (c) {
+      var s = c.map(function (v) { return snapDepth(v, bits); }), key = s.join(",");
+      if (!seen.has(key)) { seen.add(key); out.push(s); }
+    });
+    return out;
+  }
+  function kmeansRows(feats, k) {
+    var n = feats.length, dim = feats[0].length, rand = mulberry32(0);
+    k = Math.max(1, Math.min(k, n));
+    function d2(a, b) { var s = 0; for (var i = 0; i < dim; i++) s += (a[i] - b[i]) * (a[i] - b[i]); return s; }
+    var centers = [feats[Math.floor(rand() * n)].slice()];
+    var close = feats.map(function (f) { return d2(f, centers[0]); });
+    while (centers.length < k) {
+      var tot = close.reduce(function (a, b) { return a + b; }, 0), pick = Math.floor(rand() * n);
+      if (tot > 0) { var r = rand() * tot; for (var i = 0; i < n; i++) { r -= close[i]; if (r <= 0) { pick = i; break; } } }
+      centers.push(feats[pick].slice());
+      for (var j = 0; j < n; j++) close[j] = Math.min(close[j], d2(feats[j], feats[pick]));
+    }
+    var labels = new Int32Array(n);
+    for (var it = 0; it < 15; it++) {
+      var changed = false;
+      for (var q = 0; q < n; q++) {
+        var best = 0, bd = Infinity;
+        for (var c = 0; c < k; c++) { var dd = d2(feats[q], centers[c]); if (dd < bd) { bd = dd; best = c; } }
+        if (labels[q] !== best) { labels[q] = best; changed = true; }
+      }
+      if (!changed && it > 0) break;
+      for (var c2 = 0; c2 < k; c2++) {
+        var sum = new Array(dim).fill(0), cnt = 0;
+        for (var q2 = 0; q2 < n; q2++) if (labels[q2] === c2) { cnt++; for (var e = 0; e < dim; e++) sum[e] += feats[q2][e]; }
+        if (cnt) centers[c2] = sum.map(function (v) { return v / cnt; });
+      }
+    }
+    return labels;
+  }
+  function chooseTilePalettes(rgb, w, h, mode, space) {
+    var lab = space === "lab", cw = mode.cell[0], ch = mode.cell[1], cols = w / cw, rows = h / ch, N = cols * rows, npx = cw * ch;
+    var px = new Float64Array(N * npx * 3), pm = new Float64Array(N * npx * 3), feats = [];
+    for (var n = 0; n < N; n++) {
+      var ty = Math.floor(n / cols) * ch, tx = (n % cols) * cw, mean = [0, 0, 0, 0, 0, 0], labs = [];
+      for (var p = 0; p < npx; p++) {
+        var o = ((ty + Math.floor(p / cw)) * w + tx + (p % cw)) * 3, q = (n * npx + p) * 3;
+        px[q] = rgb[o]; px[q + 1] = rgb[o + 1]; px[q + 2] = rgb[o + 2];
+        var L = srgbToLab(rgb[o], rgb[o + 1], rgb[o + 2]); labs.push(L);
+        var m = lab ? L : [rgb[o], rgb[o + 1], rgb[o + 2]];
+        pm[q] = m[0]; pm[q + 1] = m[1]; pm[q + 2] = m[2];
+        for (var c = 0; c < 3; c++) mean[c] += L[c] / npx;
+      }
+      labs.forEach(function (L2) { for (var c3 = 0; c3 < 3; c3++) mean[3 + c3] += (L2[c3] - mean[c3]) * (L2[c3] - mean[c3]) / npx; });
+      for (var s = 3; s < 6; s++) mean[s] = Math.sqrt(mean[s]);
+      feats.push(mean);
+    }
+    var groups = Math.min(mode.subPalettes, N), labels = kmeansRows(feats, groups), shared = [];
+    if (mode.shared) {
+      var counts = new Map(), bestKey = 0, bestCount = -1;
+      for (var i = 0; i < N * npx; i++) {
+        var key = (snapDepth(px[i * 3], mode.bits) << 16) | (snapDepth(px[i * 3 + 1], mode.bits) << 8) | snapDepth(px[i * 3 + 2], mode.bits);
+        var c4 = (counts.get(key) || 0) + 1; counts.set(key, c4);
+        if (c4 > bestCount || (c4 === bestCount && key < bestKey)) { bestCount = c4; bestKey = key; }
+      }
+      shared = [[(bestKey >> 16) & 255, (bestKey >> 8) & 255, bestKey & 255]];
+    }
+    var sharedKeys = shared.map(function (c5) { return c5.join(","); });
+    var palettes = [];
+    for (var round = 0; round <= 2; round++) {
+      for (var g = 0; g < groups; g++) {
+        var members = [];
+        for (var t = 0; t < N; t++) if (labels[t] === g) members.push(t);
+        if (members.length) {
+          var ints = new Uint8Array(members.length * npx * 3);
+          members.forEach(function (tt, mi) { for (var z = 0; z < npx * 3; z++) ints[mi * npx * 3 + z] = Math.round(clamp255(px[tt * npx * 3 + z])); });
+          var own = groupPalette(ints, members.length * npx, mode.perCell, mode.bits, g)
+            .filter(function (c6) { return sharedKeys.indexOf(c6.join(",")) < 0; }).slice(0, mode.perCell);
+          palettes[g] = shared.concat(own);
+        }
+        if (!palettes[g] || !palettes[g].length) palettes[g] = shared.length ? shared.slice() : [[0, 0, 0]];
+      }
+      if (round === 2) break;
+      var pmPal = palettes.map(function (pl) { return pl.map(function (c7) { return lab ? srgbToLab(c7[0], c7[1], c7[2]) : c7; }); });
+      for (var n2 = 0; n2 < N; n2++) {
+        var bestG = labels[n2], bestE = Infinity;
+        for (var g2 = 0; g2 < groups; g2++) {
+          var err = 0, cand = pmPal[g2];
+          for (var p2 = 0; p2 < npx; p2++) {
+            var q2 = (n2 * npx + p2) * 3, md = Infinity;
+            for (var k = 0; k < cand.length; k++) {
+              var d0 = pm[q2] - cand[k][0], d1 = pm[q2 + 1] - cand[k][1], dz = pm[q2 + 2] - cand[k][2], dd = d0 * d0 + d1 * d1 + dz * dz;
+              if (dd < md) md = dd;
+            }
+            err += md;
+          }
+          if (err < bestE) { bestE = err; bestG = g2; }
+        }
+        labels[n2] = bestG;
+      }
+    }
+    var palette = [], index = new Map(), groupIdx = palettes.map(function (pl) {
+      return pl.map(function (c8) { var key2 = c8.join(","); if (!index.has(key2)) { index.set(key2, palette.length); palette.push(c8); } return index.get(key2); });
+    });
+    var K = mode.perCell + mode.shared, sets = new Int32Array(N * K);
+    for (var n3 = 0; n3 < N; n3++) {
+      var ids = groupIdx[labels[n3]];
+      for (var z2 = 0; z2 < K; z2++) sets[n3 * K + z2] = ids[Math.min(z2, ids.length - 1)];
+    }
+    return { palette: palette, sets: sets, K: K, cols: cols, rows: rows, shared: sharedKeys.map(function (kk) { return index.get(kk); }) };
+  }
+  function applyHam(rgb, w, h, mode, opts) {
+    var lab = metricSpace(opts.colorspace) === "lab", bits = mode.bits, lv = (1 << bits) - 1, step = 255 / lv, side = lv + 1;
+    var ints = new Uint8Array(rgb.length);
+    for (var i = 0; i < rgb.length; i++) ints[i] = Math.round(clamp255(rgb[i]));
+    var base = groupPalette(ints, w * h, 16, bits, 0).sort(function (a, b) { return luma(a) - luma(b); });
+    var baseLv = base.map(function (c) { return c.map(function (v) { return Math.round(v / step); }); }), nb = baseLv.length;
+    var table = new Float64Array(side * side * side * 3);
+    for (var r = 0; r < side; r++) for (var g = 0; g < side; g++) for (var b = 0; b < side; b++) {
+      var k = ((r * side + g) * side + b) * 3, p = lab ? srgbToLab(r * step, g * step, b * step) : [r * step, g * step, b * step];
+      table[k] = p[0]; table[k + 1] = p[1]; table[k + 2] = p[2];
+    }
+    var name = opts.dither === "sierra_lite" ? "sierra-lite" : opts.dither;
+    var thr = name === "bayer" ? bayerMatrix(opts.bayerSize || 4) : name === "pattern" || name === "bluenoise" || name === "halftone" ? threshold(name) : null;
+    var diffuse = !!data().kernels[name], modified = 0, out = new Int32Array(w * h * 3), st = { bd: 0, r: 0, g: 0, b: 0, mod: false };
+    function consider(tp, rr, gg, bb, mod) {
+      var kk = ((rr * side + gg) * side + bb) * 3, d0 = table[kk] - tp[0], d1 = table[kk + 1] - tp[1], d2 = table[kk + 2] - tp[2];
+      var dd = d0 * d0 + d1 * d1 + d2 * d2;
+      if (dd < st.bd) { st.bd = dd; st.r = rr; st.g = gg; st.b = bb; st.mod = mod; }
+    }
+    for (var y = 0; y < h; y++) {
+      var pr = baseLv[0][0], pg = baseLv[0][1], pb = baseLv[0][2], cr = 0, cg = 0, cb = 0;
+      for (var x = 0; x < w; x++) {
+        var o = (y * w + x) * 3, off = thr ? (thr.values[(y % thr.size) * thr.size + (x % thr.size)] - 0.5) * 32 : 0;
+        var tr = clamp255(clamp255(rgb[o] + off) + cr), tg = clamp255(clamp255(rgb[o + 1] + off) + cg), tb = clamp255(clamp255(rgb[o + 2] + off) + cb);
+        var tp = lab ? srgbToLab(tr, tg, tb) : [tr, tg, tb];
+        st.bd = Infinity;
+        for (var q = 0; q < nb; q++) consider(tp, baseLv[q][0], baseLv[q][1], baseLv[q][2], false);
+        for (var l = 0; l < side; l++) consider(tp, l, pg, pb, true);
+        for (l = 0; l < side; l++) consider(tp, pr, l, pb, true);
+        for (l = 0; l < side; l++) consider(tp, pr, pg, l, true);
+        pr = st.r; pg = st.g; pb = st.b;
+        if (st.mod) modified++;
+        out[o] = pr; out[o + 1] = pg; out[o + 2] = pb;
+        if (diffuse) { cr = (tr - pr * step) * 0.5; cg = (tg - pg * step) * 0.5; cb = (tb - pb * step) * 0.5; }
+      }
+    }
+    var palette = [], index = new Map(), indices = new Int32Array(w * h);
+    for (var n = 0; n < w * h; n++) {
+      var c = [Math.round(out[n * 3] * step), Math.round(out[n * 3 + 1] * step), Math.round(out[n * 3 + 2] * step)], key = c.join(",");
+      if (!index.has(key)) { index.set(key, palette.length); palette.push(c); }
+      indices[n] = index.get(key);
+    }
+    return {
+      indices: indices, palette: palette, cellSets: new Int32Array(0), K: 0, cols: 0, rows: 0,
+      report: { mode: mode.title, cells: 1, distinctCellSets: 1, colorsUsed: palette.length, shared: [], baseColors: nb, modifiedPixels: Math.round(1000 * modified / Math.max(1, w * h)) / 10 },
+    };
+  }
+
   function restrictedNearest(p, cand, K, palPts) {
     var best = cand[0], bd = Infinity;
     for (var i = 0; i < K; i++) {
@@ -562,6 +723,7 @@
   }
   function applyHardware(rgb, w, h, mode, opts) {
     var space = metricSpace(opts.colorspace), lab = space === "lab";
+    if (mode.kind === "ham") return applyHam(rgb, w, h, mode, opts);
     var cw = mode.cell[0], ch = mode.cell[1];
     var pw = Math.ceil(w / cw) * cw, ph = Math.ceil(h / ch) * ch;
     var pad = new Float64Array(pw * ph * 3);
@@ -570,9 +732,15 @@
         var sx = Math.min(x, w - 1), sy = Math.min(y, h - 1);
         for (var c = 0; c < 3; c++) pad[(y * pw + x) * 3 + c] = rgb[(sy * w + sx) * 3 + c];
       }
-    var pal = mode.palette.map(hexToRgb);
+    var cells, pal;
+    if (mode.kind === "tiled") {
+      cells = chooseTilePalettes(pad, pw, ph, mode, space);
+      pal = cells.palette;
+    } else {
+      pal = mode.palette.map(hexToRgb);
+      cells = chooseCellColors(pad, pw, ph, mode, space);
+    }
     var palPts = lab ? pal.map(function (cc) { return srgbToLab(cc[0], cc[1], cc[2]); }) : pal;
-    var cells = chooseCellColors(pad, pw, ph, mode, space);
     var K = cells.K;
     function candAt(xx, yy) {
       var n = Math.floor(yy / ch) * cells.cols + Math.floor(xx / cw);
@@ -636,7 +804,7 @@
     for (var u = 0; u < out.length; u++) used.add(out[u]);
     return {
       indices: out, palette: pal, cellSets: cells.sets, K: K, cols: cells.cols, rows: cells.rows,
-      report: { mode: mode.title, cells: cells.cols * cells.rows, distinctCellSets: distinct.size, colorsUsed: used.size, shared: cells.shared.map(function (i2) { return pal[i2]; }) },
+      report: { mode: mode.title, cells: cells.cols * cells.rows, distinctCellSets: distinct.size, colorsUsed: used.size, subPalettes: mode.kind === "tiled" ? distinct.size : undefined, shared: cells.shared.map(function (i2) { return pal[i2]; }) },
     };
   }
 

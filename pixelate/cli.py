@@ -630,6 +630,8 @@ def convert_cmd(
         console.print(
             f"[cyan]Clash:[/cyan]     {clash['mode']} · {clash['cells']} cells · "
             f"{clash['distinct_cell_sets']} distinct cell sets · {clash['colors_used']} colors used"
+            + (f" · {clash['sub_palettes']} sub-palettes" if "sub_palettes" in clash else "")
+            + (f" · {clash['modified_pixels']}% hold-and-modify" if "modified_pixels" in clash else "")
         )
 
     if report and not animated:
@@ -1227,7 +1229,8 @@ def hardware_cmd() -> None:
         aliases = f" [dim]({', '.join(mode.aliases)})[/dim]" if mode.aliases else ""
         table.add_row(
             mode.name + aliases, mode.title, f"{mode.cell[0]}×{mode.cell[1]}",
-            str(mode.colors_per_cell), f"{mode.native[0]}×{mode.native[1]}", mode.notes,
+            "HAM" if mode.kind == "ham" else str(mode.colors_per_cell),
+            f"{mode.native[0]}×{mode.native[1]}", mode.notes,
         )
     console.print(table)
     console.print("[dim]pixelate convert photo.jpg --hardware zx --pixel-size 256 --dither pattern[/dim]")
@@ -1283,6 +1286,10 @@ def swatches_cmd(palette_name: str, output_path: Optional[Path], cols: int, swat
             mode = get_hardware_mode(palette_name[3:])
         except KeyError as exc:
             raise click.ClickException(str(exc.args[0])) from exc
+        if mode.generated:
+            raise click.ClickException(
+                f"hw:{mode.name} generates its palette per image — convert an image and use --report."
+            )
         colors, title = list(mode.palette), mode.title
     else:
         try:

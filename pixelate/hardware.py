@@ -12,6 +12,13 @@ in that cell had to use one of them:
 * **MSX / TMS9918 Graphics II** — two colors per 8x1 line segment.
 * **NES** — 16x16 attribute areas, each choosing one of four 3-color
   sub-palettes that share one universal background color.
+* **Tile-palette consoles** (Game Boy Color, Mega Drive, SNES) — every 8x8
+  tile picks one of a few sub-palettes; the sub-palettes themselves are
+  generated per image (tile clustering + Lab k-means) and snapped to the
+  console's colour depth (RGB555 / RGB333).
+* **Amiga HAM6** — Hold-And-Modify: each pixel either loads one of 16 base
+  colours or copies the pixel to its left and changes one RGB channel, so
+  up to 4096 colours on screen with the famous horizontal colour fringing.
 
 :func:`apply_hardware` searches, per cell, for the color set that best fits
 the source (exhaustively over every legal combination, in CIELAB or RGB),
@@ -68,10 +75,18 @@ class HardwareMode:
     native: Tuple[int, int] = (256, 192)
     notes: str = ""
     aliases: Tuple[str, ...] = field(default=())
+    kind: str = "cells"  # cells | tiled | ham
+    bits: int = 8  # colour depth per channel for generated palettes
+    sub_palettes: int = 0  # tiled: number of sub-palettes
 
     @property
     def colors_per_cell(self) -> int:
         return self.per_cell + self.shared
+
+    @property
+    def generated(self) -> bool:
+        """True when the palette is generated per image (tiled / HAM modes)."""
+        return self.kind != "cells"
 
     @property
     def pixel_size(self) -> int:
@@ -112,6 +127,30 @@ HARDWARE_MODES: Dict[str, HardwareMode] = {
             shared=1, max_sets=4, native=(256, 240),
             notes="universal background + one of four 3-color sub-palettes per 16x16 area",
             aliases=("famicom",),
+        ),
+        HardwareMode(
+            "gbc", "Game Boy Color", (), (8, 8), 4, kind="tiled", bits=5,
+            sub_palettes=8, native=(160, 144),
+            notes="8 generated 4-colour sub-palettes (RGB555), one per 8x8 tile",
+            aliases=("game-boy-color", "cgb"),
+        ),
+        HardwareMode(
+            "megadrive", "Sega Mega Drive / Genesis", (), (8, 8), 15, shared=1,
+            kind="tiled", bits=3, sub_palettes=4, native=(320, 224),
+            notes="4 generated 16-colour sub-palettes from 512 colours (RGB333), shared backdrop",
+            aliases=("genesis", "md"),
+        ),
+        HardwareMode(
+            "snes", "Super Nintendo", (), (8, 8), 15, shared=1, kind="tiled",
+            bits=5, sub_palettes=8, native=(256, 224),
+            notes="8 generated 16-colour sub-palettes (RGB555), shared backdrop",
+            aliases=("super-famicom", "sfc"),
+        ),
+        HardwareMode(
+            "amiga-ham", "Amiga HAM6", (), (1, 1), 1, kind="ham", bits=4,
+            native=(320, 256),
+            notes="16 base colours + hold-and-modify one RGB channel (4096 colours)",
+            aliases=("ham", "ham6", "amiga"),
         ),
     )
 }
@@ -366,6 +405,12 @@ class HardwareResult:
     cell_sets: np.ndarray  # (rows, cols, K) palette indices per cell
     shared: Tuple[int, ...]
     mode: HardwareMode
+    palette: Optional[Tuple[RGB, ...]] = None  # generated palettes (tiled / HAM)
+    extra: Optional[Dict[str, object]] = None  # mode-specific report fields
+
+    @property
+    def colors(self) -> Tuple[RGB, ...]:
+        return tuple(self.palette) if self.palette is not None else tuple(self.mode.palette)
 
 
 def apply_hardware(
@@ -386,16 +431,23 @@ def apply_hardware(
     key = _canonical(dither)
     get_dither(key)  # validate name
     img = np.asarray(image, dtype=np.float64)
+    metric = _metric_space(space)
+    if hw.kind == "ham":
+        return _apply_ham(img, hw, key, metric, bayer_size)
     h, w = img.shape[:2]
     cw, ch = hw.cell
     ph = -(-h // ch) * ch
     pw = -(-w // cw) * cw
     padded = np.pad(img, ((0, ph - h), (0, pw - w), (0, 0)), mode="edge")
 
-    metric = _metric_space(space)
-    pal = np.asarray(hw.palette, dtype=np.float64)
+    generated: Optional[Tuple[RGB, ...]] = None
+    if hw.kind == "tiled":
+        generated, sets, shared = choose_tile_palettes(padded, hw, space=metric)
+        pal = np.asarray(generated, dtype=np.float64)
+    else:
+        pal = np.asarray(hw.palette, dtype=np.float64)
+        sets, shared = choose_cell_colors(padded, hw, space=metric)
     pal_m = _to_metric(pal, metric)
-    sets, shared = choose_cell_colors(padded, hw, space=metric)
     pix_sets = _expand_sets(sets, cw, ch)
 
     if key in KERNELS or key == "sierra_lite":
@@ -412,7 +464,11 @@ def apply_hardware(
 
     idx = idx[:h, :w]
     out = np.clip(pal[idx], 0, 255).astype(np.uint8)
-    return HardwareResult(out, idx.astype(np.int64), sets, shared, hw)
+    extra: Optional[Dict[str, object]] = None
+    if generated is not None:
+        groups = {tuple(sorted(set(int(v) for v in row))) for row in sets.reshape(-1, sets.shape[-1])}
+        extra = {"sub_palettes": len(groups), "bits": hw.bits}
+    return HardwareResult(out, idx.astype(np.int64), sets, shared, hw, generated, extra)
 
 
 def clash_report(result: HardwareResult) -> Dict[str, object]:
@@ -420,10 +476,213 @@ def clash_report(result: HardwareResult) -> Dict[str, object]:
     sets = result.cell_sets.reshape(-1, result.cell_sets.shape[-1])
     distinct = {tuple(sorted(set(int(v) for v in row))) for row in sets}
     used = sorted({int(v) for v in np.unique(result.indices)})
-    return {
+    report: Dict[str, object] = {
         "mode": result.mode.title,
         "cells": int(sets.shape[0]),
         "distinct_cell_sets": len(distinct),
-        "shared": [tuple(result.mode.palette[i]) for i in result.shared],
+        "shared": [tuple(result.colors[i]) for i in result.shared],
         "colors_used": len(used),
     }
+    report.update(result.extra or {})
+    return report
+
+
+# ---------------------------------------------------------------------------
+# Generated palettes: tile-palette consoles and Amiga HAM6
+# ---------------------------------------------------------------------------
+
+def snap_to_depth(rgb: np.ndarray, bits: int) -> np.ndarray:
+    """Round 0-255 RGB to the nearest colour representable with *bits* per channel."""
+    levels = (1 << int(bits)) - 1
+    q = np.round(np.clip(np.asarray(rgb, dtype=np.float64), 0, 255) * levels / 255.0)
+    return np.round(q * 255.0 / levels)
+
+
+def _kmeans_rows(features: np.ndarray, k: int, seed: int = 0, iters: int = 15) -> np.ndarray:
+    """Deterministic k-means++ labels for a small (N, D) feature matrix."""
+    n = features.shape[0]
+    k = max(1, min(k, n))
+    rng = np.random.default_rng(seed)
+    centers = [features[int(rng.integers(0, n))]]
+    d2 = ((features - centers[0]) ** 2).sum(axis=1)
+    while len(centers) < k:
+        total = float(d2.sum())
+        pick = int(rng.integers(0, n)) if total <= 0 else int(rng.choice(n, p=d2 / total))
+        centers.append(features[pick])
+        d2 = np.minimum(d2, ((features - features[pick]) ** 2).sum(axis=1))
+    c = np.asarray(centers, dtype=np.float64)
+    labels = np.zeros(n, dtype=np.int64)
+    for _ in range(iters):
+        dist = ((features[:, None, :] - c[None, :, :]) ** 2).sum(axis=2)
+        new = dist.argmin(axis=1)
+        if np.array_equal(new, labels) and _ > 0:
+            break
+        labels = new
+        for j in range(k):
+            if np.any(labels == j):
+                c[j] = features[labels == j].mean(axis=0)
+    return labels
+
+
+def _group_palette(pixels: np.ndarray, n: int, bits: int, seed: int = 0) -> List[RGB]:
+    from pixelate.core import _kmeans_palette
+
+    if pixels.shape[0] > 6000:
+        rng = np.random.default_rng(seed)
+        pixels = pixels[rng.choice(pixels.shape[0], 6000, replace=False)]
+    uniq = np.unique(snap_to_depth(pixels, bits), axis=0)
+    if uniq.shape[0] <= n:
+        cols = uniq
+    else:
+        cols = snap_to_depth(np.asarray(_kmeans_palette(pixels, n, seed=seed), dtype=np.float64), bits)
+    out: List[RGB] = []
+    for c in cols:
+        t = (int(c[0]), int(c[1]), int(c[2]))
+        if t not in out:
+            out.append(t)
+    return out
+
+
+def choose_tile_palettes(
+    image: np.ndarray,
+    mode: HardwareMode,
+    space: str = "lab",
+    rounds: int = 2,
+) -> Tuple[Tuple[RGB, ...], np.ndarray, Tuple[int, ...]]:
+    """
+    Generate a tile-palette console's sub-palettes for *image* (padded to
+    whole tiles) and assign one to every tile.
+
+    Tiles are clustered on mean / spread of their Lab colour, each cluster
+    gets a Lab k-means palette snapped to the console's colour depth, then
+    tiles are re-assigned to whichever sub-palette reproduces them best and
+    the palettes are refit (*rounds* times). Returns ``(palette, sets,
+    shared)`` where ``sets`` is ``(rows, cols, K)`` indices into ``palette``.
+    """
+    metric = _metric_space(space)
+    cw, ch = mode.cell
+    cells_rgb, rows, cols = _cells(np.asarray(image, dtype=np.float64), cw, ch)
+    n_tiles = cells_rgb.shape[0]
+    lab = srgb_to_lab(np.clip(cells_rgb.reshape(-1, 3), 0, 255)).reshape(cells_rgb.shape)
+    features = np.concatenate([lab.mean(axis=1), lab.std(axis=1)], axis=1)
+    groups = min(mode.sub_palettes, n_tiles)
+    labels = _kmeans_rows(features, groups)
+
+    shared_rgb: List[RGB] = []
+    if mode.shared:
+        snapped = snap_to_depth(cells_rgb.reshape(-1, 3), mode.bits).astype(np.int64)
+        keys = (snapped[:, 0] << 16) | (snapped[:, 1] << 8) | snapped[:, 2]
+        vals, counts = np.unique(keys, return_counts=True)
+        top = int(vals[int(np.argmax(counts))])
+        shared_rgb = [((top >> 16) & 255, (top >> 8) & 255, top & 255)]
+
+    per = mode.per_cell
+    pix_m = _to_metric(cells_rgb.reshape(-1, 3), metric).reshape(cells_rgb.shape)
+    palettes: List[List[RGB]] = [shared_rgb[:] for _ in range(groups)]
+    for r in range(rounds + 1):
+        for g in range(groups):
+            members = cells_rgb[labels == g]
+            if members.shape[0]:
+                palettes[g] = shared_rgb + [
+                    c for c in _group_palette(members.reshape(-1, 3), per, mode.bits, seed=g)
+                    if c not in shared_rgb
+                ][:per]
+            if not palettes[g]:
+                palettes[g] = shared_rgb[:] or [(0, 0, 0)]
+        if r == rounds:
+            break
+        errors = np.empty((n_tiles, groups))
+        for g, pal_g in enumerate(palettes):
+            pm = _to_metric(np.asarray(pal_g, dtype=np.float64), metric)
+            sq = np.einsum("npc,npc->np", pix_m, pix_m)[:, :, None] - 2.0 * (pix_m @ pm.T) + np.einsum("kc,kc->k", pm, pm)
+            errors[:, g] = np.maximum(sq, 0).min(axis=2).sum(axis=1)
+        labels = errors.argmin(axis=1)
+
+    palette: List[RGB] = []
+    index_of: Dict[RGB, int] = {}
+    group_idx: List[List[int]] = []
+    for pal_g in palettes:
+        ids = []
+        for c in pal_g:
+            if c not in index_of:
+                index_of[c] = len(palette)
+                palette.append(c)
+            ids.append(index_of[c])
+        group_idx.append(ids)
+    k = mode.colors_per_cell
+    sets = np.empty((n_tiles, k), dtype=np.int64)
+    for t in range(n_tiles):
+        ids = group_idx[int(labels[t])]
+        sets[t] = (ids + [ids[-1]] * k)[:k]
+    shared = tuple(index_of[c] for c in shared_rgb)
+    return tuple(palette), sets.reshape(rows, cols, k), shared
+
+
+def _apply_ham(img: np.ndarray, hw: HardwareMode, key: str, metric: str, bayer_size: int) -> HardwareResult:
+    """
+    Amiga HAM6. Base palette: 16 Lab k-means colours snapped to 4 bits per
+    channel (index 0, the darkest, is the border colour each line starts
+    from). Scanning left to right, every pixel picks the best of: the 16
+    base colours, or the previous pixel with R, G or B replaced by any of
+    its 16 levels — vectorized across all rows at once. Diffusion dithers
+    carry half the error to the right (HAM is inherently left-to-right);
+    ordered / pattern dithers offset the target by their threshold map.
+    """
+    h, w = img.shape[:2]
+    bits = hw.bits
+    lv = (1 << bits) - 1
+    step = 255.0 / lv
+    base = _group_palette(img.reshape(-1, 3), 16, bits)
+    base.sort(key=lambda c: 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2])
+    base_lv = np.round(np.asarray(base, dtype=np.float64) / step).astype(np.int64)
+    nb = base_lv.shape[0]
+
+    side = lv + 1
+    grid = np.stack(np.meshgrid(*[np.arange(side)] * 3, indexing="ij"), axis=-1).reshape(-1, 3)
+    table = _to_metric(grid * step, metric)  # metric coords for every 12-bit colour
+
+    target = np.clip(img, 0, 255)
+    if key == "bayer" or key in ("pattern", "bluenoise", "halftone"):
+        m = {"bayer": bayer_matrix(int(bayer_size)), "pattern": bayer_matrix(8),
+             "bluenoise": blue_noise(), "halftone": halftone_matrix()}[key]
+        target = np.clip(target + (_tile(m, h, w)[..., None] - 0.5) * 32.0, 0, 255)
+    diffuse = key in KERNELS or key == "sierra_lite"
+
+    prev = np.repeat(base_lv[:1], h, axis=0)
+    out_lv = np.empty((h, w, 3), dtype=np.int64)
+    modified = 0
+    levels = np.arange(side)
+    rows = np.arange(h)
+    carry = np.zeros((h, 3))
+    for x in range(w):
+        t = np.clip(target[:, x] + carry, 0, 255)
+        cand = np.empty((h, nb + 3 * side, 3), dtype=np.int64)
+        cand[:, :nb] = base_lv[None]
+        for c in range(3):
+            block = np.repeat(prev[:, None, :], side, axis=1)
+            block[:, :, c] = levels[None, :]
+            cand[:, nb + c * side: nb + (c + 1) * side] = block
+        keys = (cand[..., 0] * side + cand[..., 1]) * side + cand[..., 2]
+        tm = _to_metric(t, metric)
+        d = ((table[keys] - tm[:, None, :]) ** 2).sum(axis=2)
+        pick = d.argmin(axis=1)
+        chosen = cand[rows, pick]
+        modified += int((pick >= nb).sum())
+        out_lv[:, x] = chosen
+        prev = chosen
+        if diffuse:
+            carry = (t - chosen * step) * 0.5
+
+    rgb = np.round(out_lv * step).astype(np.int64)
+    flat = rgb.reshape(-1, 3)
+    uniq, inverse = np.unique(flat, axis=0, return_inverse=True)
+    palette = tuple((int(c[0]), int(c[1]), int(c[2])) for c in uniq)
+    idx = inverse.reshape(h, w).astype(np.int64)
+    lookup = {c: i for i, c in enumerate(palette)}
+    def _rgb(lv_row: np.ndarray) -> RGB:
+        r, g, b = (int(v) for v in np.round(lv_row * step))
+        return (r, g, b)
+
+    base_ids = np.array([[[lookup.get(_rgb(b), 0) for b in base_lv]]])
+    extra: Dict[str, object] = {"base_colors": nb, "modified_pixels": round(100.0 * modified / max(1, h * w), 1)}
+    return HardwareResult(rgb.astype(np.uint8), idx, base_ids, (), hw, palette, extra)

@@ -139,7 +139,7 @@ def test_compare_hardware_modes(tmp_path):
     out = tmp_path / "cmp.png"
     r = _run("compare", _src(tmp_path), "--palettes", "hw:zx,hw:nes,gameboy", "--pixel-size", "32", "-o", out)
     assert r.exit_code == 0, r.output
-    bad = CliRunner().invoke(cli, ["compare", str(_src(tmp_path)), "--palettes", "hw:amiga"])
+    bad = CliRunner().invoke(cli, ["compare", str(_src(tmp_path)), "--palettes", "hw:atari-st"])
     assert bad.exit_code != 0
 
 
