@@ -10,7 +10,7 @@ from the working colors (Pillow is not allowed to invent extra colors).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from PIL import Image, ImageOps
 
@@ -106,6 +106,8 @@ def pixelate_animation(
     seed: Optional[int] = None,
     downscale: str = "box",
     distance: Optional[str] = None,
+    preset: Optional[str] = None,
+    **extra: Any,
 ) -> Union[Image.Image, Tuple[FrameList, DurationList]]:
     """
     Pixelate every frame of an animated (or still) image.
@@ -119,6 +121,13 @@ def pixelate_animation(
     colors, extract_method, scale, edges, invert, contrast, colorspace, serpentine,
     phosphor, posterize, bayer_size, seed, downscale, distance :
         Additional pipeline options forwarded per frame.
+    preset :
+        Named recipe (see :mod:`pixelate.presets`); explicit non-default
+        arguments win. Resolved once so every frame shares one look.
+    **extra :
+        Any other :func:`pixelate.core.pixelate_image` keyword (``hardware``,
+        ``upscaler``, ``outline``, ``grid``, ``chromatic``, ``color_bleed``,
+        ``curvature``, ``cleanup``, …), forwarded to every frame.
     output :
         If given, save an animated GIF to this path and return the first
         frame image (for convenience). If ``None``, return
@@ -130,6 +139,14 @@ def pixelate_animation(
         Saved first frame when *output* is set; otherwise pixelated frames
         and per-frame durations in milliseconds.
     """
+    if preset is not None:
+        from pixelate.core import _defaults
+        from pixelate.presets import merge_preset
+        given = {k: v for k, v in locals().items() if k in _defaults()}
+        given.update(extra)
+        merged = merge_preset(preset, given, _defaults())
+        return pixelate_animation(src, output=output, **merged)
+
     source_frames, durations = load_frames(src)
 
     # For auto palette, extract once from the first frame so colors stay stable
@@ -171,6 +188,7 @@ def pixelate_animation(
             seed=seed,
             downscale=downscale,
             distance=distance,
+            **extra,
         )
         out_frames.append(result)
 
@@ -234,7 +252,7 @@ def save_animation(
             durs.append(max(1, int(durations[-1]) if durations else 100))
 
     first, rest = p_frames[0], p_frames[1:]
-    save_kwargs = {
+    save_kwargs: Dict[str, Any] = {
         "save_all": True,
         "append_images": list(rest),
         "duration": durs,

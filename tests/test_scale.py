@@ -31,7 +31,7 @@ def test_nearest_scale_invalid():
     img = Image.new("RGB", (4, 4), (0, 0, 0))
     try:
         nearest_scale(img, 0)
-        assert False, "expected ValueError"
+        raise AssertionError("expected ValueError")
     except ValueError:
         pass
 

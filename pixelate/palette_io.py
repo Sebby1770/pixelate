@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Sequence, Tuple, Union
 
-from pixelate.palettes import PALETTES, Palette, RGB
+from pixelate.palettes import PALETTES, RGB, Palette
 
 PathLike = Union[str, Path]
 

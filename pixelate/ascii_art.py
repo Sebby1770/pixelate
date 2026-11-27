@@ -48,6 +48,7 @@ def image_to_ascii(
     invert : bool
         Reverse the ramp (useful for light terminal backgrounds).
     """
+    img: Image.Image
     if isinstance(src, (str, Path)):
         img = Image.open(src)
     else:
@@ -57,7 +58,7 @@ def image_to_ascii(
     # Compensate for terminal cell aspect (chars are ~2:1 tall:wide)
     w_orig, h_orig = img.size
     new_h = max(1, int(width * h_orig / w_orig * 0.5))
-    img = img.resize((width, new_h), Image.LANCZOS)
+    img = img.resize((width, new_h), Image.Resampling.LANCZOS)
 
     arr = np.array(img)
     gray = (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2])

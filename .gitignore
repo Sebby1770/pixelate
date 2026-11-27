@@ -34,3 +34,8 @@ htmlcov/
 # Output
 output/
 *.log
+
+# Local
+.venv/
+.ruff_cache/
+.mypy_cache/

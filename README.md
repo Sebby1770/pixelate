@@ -7,71 +7,56 @@
 ██╔═══╝ ██║ ██╔██╗ ██╔══╝  ██║     ██╔══██║   ██║   ██╔══╝
 ██║     ██║██╔╝ ██╗███████╗███████╗██║  ██║   ██║   ███████╗
 ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
-        retro pixel art from any image  ·  v2.5.0
+        retro pixel art from any image  ·  v3.0.0
 ```
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9--3.14-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/Sebby1770/pixelate/actions/workflows/ci.yml/badge.svg)](https://github.com/Sebby1770/pixelate/actions/workflows/ci.yml)
 [![Built with Pillow](https://img.shields.io/badge/built%20with-Pillow-8A2BE2.svg)](https://python-pillow.org/)
 
-**Web lab:** [https://sebby1770.github.io/pixelate/](https://sebby1770.github.io/pixelate/)
+**PIXELATE Studio (web):** [https://sebby1770.github.io/pixelate/](https://sebby1770.github.io/pixelate/)
 
-> Turn any image (or animated GIF) into authentic retro pixel art using classic gaming palettes, **box (area) downscale**, **CIELAB (CIE76) matching** with optional **CIEDE2000**, Lab-space k-means++ auto palettes, serpentine error diffusion, Sierra-3 / Sierra Lite plus the rest of the classic kernels, CRT bloom + phosphor + scanlines, indexed PNG/GIF, process-pool batch conversion, palette compare grids, and spritesheet export. Or open the static **web playground**. Or print it as ANSI art straight to your terminal.
+> Turn any image (or animated GIF) into authentic retro pixel art. PIXELATE goes beyond "quantize to a palette": it can emulate the **attribute clash** of real 8-bit hardware (ZX Spectrum, C64, MSX, NES), uses **palette-aware pattern dithering** (Knoll / blue noise / halftone), runs error diffusion **30–80× faster** than 2.x through cached lookup tables, and exports to PNG, GIF, **SVG, JSON and C headers**.
 
 ---
 
 ## Gallery
 
-| Source | Game Boy | PICO-8 (Bayer) | C64 + CRT |
+| Source | ZX Spectrum (clash) | C64 multicolor | NES sub-palettes |
 |:---:|:---:|:---:|:---:|
-| ![source](assets/source.png) | ![gameboy](assets/example_gameboy.png) | ![pico8](assets/example_pico8.png) | ![c64](assets/example_c64_crt.png) |
-| original | `--palette gameboy` | `--palette pico8 --dither bayer` | `--palette c64 --crt --scanlines` |
+| ![source](assets/source.png) | ![zx](assets/example_zx.png) | ![c64](assets/example_c64_multi.png) | ![nes](assets/example_nes.png) |
+| original | `--preset zx-loading-screen` | `--preset c64-demo` | `--preset nes-cart` |
+
+| PICO-8 blue noise | Newsprint halftone | Vaporwave VHS | Game Boy |
+|:---:|:---:|:---:|:---:|
+| ![bluenoise](assets/example_bluenoise.png) | ![halftone](assets/example_halftone.png) | ![vhs](assets/example_vhs.png) | ![gameboy](assets/example_gameboy.png) |
+| `--palette pico8 --dither bluenoise` | `--preset newsprint` | `--preset vaporwave-vhs` | `--palette gameboy` |
+
+**Every hardware mode side by side** — `pixelate compare photo.jpg --palettes hw:zx,hw:c64,hw:c64-multi,hw:msx,hw:nes,pico8`
+
+![hardware compare](assets/compare_hardware.png)
+
+**Dithers** — error diffusion vs ordered vs the new pattern family:
+
+![dither compare](assets/compare_dithers.png)
 
 ---
 
-## Why?
+## What's new in 3.0
 
-Modern image filters smooth everything out. PIXELATE goes the other way — it crushes color depth down to the exact palettes used by the consoles and home computers of the 80s and 90s, dithers cleverly to preserve detail, and gives you a finished pixel-art image that looks like it shipped on a cartridge.
+- **Hardware modes** — `--hardware zx|c64|c64-multi|msx|nes` restricts every attribute cell to the colors the real machine allowed, searched exhaustively per cell (plus a shared background / four NES sub-palettes chosen globally), then dithers *inside* each cell. C64 multicolor uses true double-wide pixels.
+- **Pattern dithering** — `pattern` (Thomas Knoll's algorithm over Bayer 8×8), `bluenoise` (void-and-cluster mask) and `halftone` (clustered dot). Palette-aware, so irregular retro palettes dither cleanly instead of banding.
+- **Fast engine** — error diffusion runs on a padded scalar buffer with a cached 64³ nearest-palette table (`pixelate.lut`). Floyd–Steinberg at 512 px: **3.9 s → 0.12 s**; CIEDE2000 diffusion at 256 px: **3.1 s → 33 ms**.
+- **Presets** — twelve one-flag looks (`--preset zx-loading-screen`, `mac-classic`, `arcade-crt`, `sprite`, …) plus your own JSON presets. Flags you type always win.
+- **Exports** — `-o art.svg` (run-merged, crisp vector), `-o art.json` (indexed pixels + palette), `-o art.h` (C arrays for homebrew), `pixelate swatches` sheets.
+- **New effects** — palette-locked `--outline`, `--grid`, `--chromatic`, `--color-bleed` (NTSC), `--curvature` (barrel CRT), `--cleanup` (orphan pixels).
+- **Scale2x / Scale3x** — `--upscaler scale2x|scale3x|scale4x` smooths staircases without inventing colors.
+- **14 new palettes** — Game Gear, Virtual Boy, Amstrad CPC, Teletext, DB32, CGA palette 0, 1-bit, SLSO8, Demichrome, Kirokaze, Ice Cream GB, Hollow, AYY4 (38 unique palettes total).
+- **PIXELATE Studio** — the web lab rebuilt: worker-powered engine shared with the Python algorithms, hardware modes, presets, split before/after view, zoom, webcam, clipboard, share links, SVG/JSON/palette export.
+- **Tooling** — ruff + mypy clean, CI on Python 3.9–3.14, node tests for the web engine, generated `web/data.json` kept in sync with the package.
 
-## Features (v2.5)
-
-- **Authentic box downscale** — `--downscale box|lanczos|nearest` (default **box**). Area averaging keeps chunky pixels; Lanczos was blurring before quantize.
-- **CIEDE2000 matching** — `--distance ciede2000` (alias `--colorspace`). Default remains CIE76 `lab` so 2.4 palettes don't silently shift.
-- **Sierra-3 + Sierra Lite** — `--dither sierra3` and `--dither sierra-lite` (alias `sierra_lite`). Existing `sierra` is still Sierra-2.
-- **`--seed` samples too** — auto-palette pixel subsample uses the same seed as k-means (was hardcoded 42).
-- **Batch `--jobs N`** — `ProcessPoolExecutor` when N>1 (falls back to threads on spawn failure). `jobs=1` stays in-process.
-- **Web lab** — downscale select (box / lanczos / nearest), sierra3 / sierra-lite, version 2.5.0.
-- **Lab k-means auto palette** — `--palette auto` clusters in CIE L*a*b* with k-means++ (same space as matching).
-- **`--seed`** — RNG seed for auto k-means and subsample (k-means default 0); `lab_to_srgb()` / `ciede2000()`.
-- **Web lab phosphor + posterize** — RGB column stripes on the output canvas; posterize 0=off or 2–8 before dither.
-- **k-means++ auto palette** — `--palette auto` clusters with k-means++ (deterministic seed).
-- **CRT order + phosphor** — bloom, then RGB phosphor mask (`--phosphor`), then sharp scanlines.
-- **Bayer size** — `--bayer-size 2|4|8` (default 4) when `--dither bayer`.
-- **Posterize** — `--posterize N` (2–16 levels) before quantize.
-- **CIELAB matching** — nearest palette color uses CIE76 Lab by default (`--colorspace` / `--distance lab|rgb|ciede2000`).
-- **Serpentine dither** — error diffusion scans odd rows right-to-left (`--no-serpentine` to disable).
-- **Jarvis-Judice-Ninke** — `--dither jjn` plus floyd / atkinson / bayer / stucki / burkes / sierra / sierra3 / sierra-lite / none.
-- **Alpha + EXIF** — orientation is respected; transparent sources stay RGBA; spritesheets keep tile alpha.
-- **Indexed PNG / locked GIF** — JPEG destinations become PNG; stills can write mode-`P` with the exact palette; GIFs share one palette (`disposal=2`).
-- **Auto palette + honest `--report`** — working colors live on `result.info["pixelate_palette"]` (extracted after preprocess+resize).
-- **`pixelate extract`** — dump N colors to a GIMP `.gpl` (optional `.hex`).
-- **Web playground** — static `web/` lab (drag-and-drop, serpentine, palette compare, PNG download). No build step.
-- **Auto palette** — `--palette auto --colors N` extracts colors from the image (k-means or median-cut, numpy only).
-- **Palette compare grid** — side-by-side collage of multiple palettes with labels.
-- **Extra nearest scale** — `--scale N` for chunky display pixels after conversion.
-- **Edge pre-pass** — `--edges` sharpen/emboss-lite to keep outlines.
-- **Color usage report** — `--report` shows pixel counts per palette color.
-- **Invert / contrast** — quick pre-quantize tweaks.
-- **28+ retro palettes** — Game Boy DMG/Pocket/Color, NES, C64, VIC-20, Atari 2600, ZX Spectrum, CGA, PICO-8, Apple II, EGA, MSX, Sega Master System, DawnBringer 16, Sweetie 16, Endesga 32, Macintosh 16-color, vaporwave, Tokyo Night, cyberpunk, sunset, mono phosphor, grayscale.
-- **Custom palette files** — load or write GIMP `.gpl` / `.hex` via `--palette-file`, `extract`, and `palettes --save-gpl`.
-- **Animated GIF / WebP** — multi-frame inputs are auto-detected; frame durations are preserved.
-- **Batch convert** — process whole directories; stills always land as `.png` (never keep `.jpg`).
-- **Spritesheet export** — tile converted images into a grid.
-- **CRT effects** — soft bloom + vignette, optional phosphor grille, horizontal scanlines.
-- **ASCII / ANSI mode** — render any image as colored terminal art.
-- **Beautifully retro CLI** — green-on-black banner, palette previews, swatches, progress bars.
-- **Clean Python API** — `pixelate_image()`, `dither_image()`, `srgb_to_lab()`, `lab_to_srgb()`, `ciede2000()`, `extract_palette()`, `compare_palettes()`, and more.
+See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ## Install
 
@@ -86,13 +71,8 @@ Dev / tests:
 ```bash
 pip install -e ".[dev]"
 pytest
-```
-
-Or just install the dependencies and run as a module:
-
-```bash
-pip install -r requirements.txt
-python -m pixelate --help
+ruff check . && mypy
+node --test "web/tests/*.test.cjs"
 ```
 
 ## Usage
@@ -101,353 +81,214 @@ python -m pixelate --help
 
 ```bash
 pixelate convert photo.jpg --palette gameboy --pixel-size 96 --dither floyd
-# Lab matching + serpentine + box downscale are the defaults
-pixelate convert photo.jpg --colorspace rgb --no-serpentine --dither jjn
-pixelate convert photo.jpg --downscale nearest --distance ciede2000 --dither none
-pixelate convert photo.jpg --dither sierra3 --downscale box
+pixelate convert photo.jpg --palette pico8 --dither bluenoise
+pixelate convert photo.jpg --palette sweetie16 --dither pattern --upscaler scale2x
+pixelate convert photo.jpg --colorspace ciede2000 --dither sierra3
 ```
 
-Auto palette from the image:
+### Hardware modes (attribute clash)
 
 ```bash
-pixelate convert photo.jpg --palette auto --colors 12 --dither floyd -o auto.png
-pixelate convert photo.jpg --palette auto --colors 8 --extract-method median-cut
-pixelate convert photo.jpg --palette auto --colors 12 --seed 1
+pixelate hardware                                   # list modes and their rules
+pixelate convert photo.jpg --hardware zx            # 256 px, ink + paper per 8×8 cell
+pixelate convert photo.jpg --hardware c64-multi --dither bayer
+pixelate convert photo.jpg --hardware nes --dither none --report
 ```
 
-Crank up the retro:
+| Mode | Machine | Cell | Colors / cell | Rules |
+|------|---------|------|---------------|-------|
+| `zx` | ZX Spectrum | 8×8 | 2 | ink + paper from the same BRIGHT bank |
+| `c64` | Commodore 64 hires | 8×8 | 2 | any two of 16 |
+| `c64-multi` | Commodore 64 multicolor | 4×8 (wide pixels) | 4 | shared background + 3 per cell |
+| `msx` | MSX / TMS9918 Graphics II | 8×1 | 2 | two colors per line segment |
+| `nes` | NES background | 16×16 | 4 | universal background + one of four 3-color sub-palettes |
+
+`--hardware` overrides `--palette` and, unless you pass `--pixel-size`, uses the machine's native resolution. Any dither works — it just has to stay inside each cell's colors.
+
+### Presets
 
 ```bash
-pixelate convert photo.jpg \
-  --palette nes \
-  --pixel-size 128 \
-  --dither stucki \
-  --upscale 4 \
-  --scale 2 \
-  --edges \
-  --crt --phosphor --scanlines \
-  --posterize 8 \
-  --report \
-  -o photo_retro.png
+pixelate presets
+pixelate convert photo.jpg --preset mac-classic
+pixelate convert photo.jpg --preset arcade-crt --pixel-size 200   # your flag wins
+pixelate convert photo.jpg --presets-file my_looks.json --preset neon
 ```
 
-Invert + contrast:
+Built in: `gameboy-camera`, `zx-loading-screen`, `c64-demo`, `nes-cart`, `msx-title`, `pico8-postcard`, `mac-classic`, `newsprint`, `vaporwave-vhs`, `arcade-crt`, `sprite`, `virtual-boy`.
+
+A presets file is JSON: `{"neon": {"description": "…", "palette": "cyberpunk", "dither": "bluenoise", "crt": true}}` — keys are `pixelate_image` arguments.
+
+### Effects
 
 ```bash
-pixelate convert photo.jpg --palette mono-green --invert --contrast 1.5
+pixelate convert photo.jpg --palette nes --crt --phosphor --scanlines --curvature 0.06
+pixelate convert photo.jpg --palette vaporwave --chromatic 2 --color-bleed 0.6
+pixelate convert sprite.png --palette auto --colors 12 --cleanup 1 --outline 1 --upscaler scale3x --upscale 6
+pixelate convert sprite.png --palette db16 --grid --upscale 8
 ```
 
-### Compare palettes
+Effect order: grid → CRT bloom → color bleed → RGB split → phosphor → scanlines → curvature.
+
+### Export
+
+```bash
+pixelate convert photo.jpg --palette pico8 -o art.svg     # vector, one <rect> per color run
+pixelate convert photo.jpg --palette pico8 -o art.json    # {"palette": [...], "pixels": [[...]]}
+pixelate convert sprite.png --hardware nes -o sprite.h    # C header with palette + index arrays
+pixelate swatches pico8 -o pico8.png                      # palette sheet (also hw:c64, .gpl, .hex)
+```
+
+### Compare
 
 ```bash
 pixelate compare photo.jpg --palettes gameboy,nes,pico8,c64 -o compare.png
-pixelate compare photo.jpg --palettes vaporwave,tokyo-night,cyberpunk,sunset --cols 2
+pixelate compare photo.jpg --palettes hw:zx,hw:c64,hw:msx,hw:nes --dither pattern
 ```
 
-### Custom palette file
+### Auto palette, custom palettes, extraction
 
 ```bash
-pixelate convert photo.jpg --palette-file my_colors.gpl -o custom.png
-pixelate convert photo.jpg --palette-file neon.hex --dither burkes
-```
-
-`.hex` files are one `RRGGBB` or `#RRGGBB` color per line. `.gpl` is the GIMP palette format.
-
-Extract a palette from an image, or dump a built-in:
-
-```bash
+pixelate convert photo.jpg --palette auto --colors 12 --seed 1
+pixelate convert photo.jpg --palette-file my_colors.gpl
 pixelate extract photo.jpg -o photo.gpl --colors 12
-pixelate extract photo.jpg -o photo.gpl --hex
 pixelate palettes --save-gpl pico8 -o pico8.gpl
 ```
 
-Preview / session-register a file:
+### Animation, batch, spritesheets, ASCII
 
 ```bash
-pixelate palettes --load my_colors.gpl
-pixelate palettes --load my_colors.gpl --register-as neon
-```
-
-### Animated GIF
-
-Animated GIF/WebP inputs are detected automatically. Output defaults to `.gif` and keeps approximate frame durations:
-
-```bash
-pixelate convert walk_cycle.gif --palette pico8 --pixel-size 64 -o walk_pixel.gif
-```
-
-### Batch convert
-
-```bash
-pixelate batch ./photos -o ./pixelated --palette vaporwave --dither sierra
-pixelate batch ./sprites -o ./out --recursive --palette db16
-pixelate batch ./photos -o ./out --jobs 4 --palette auto --colors 12 --seed 1
-```
-
-### Spritesheet
-
-Convert and tile images (files and/or a directory) into one sheet:
-
-```bash
+pixelate convert walk.gif --palette pico8 --pixel-size 64 -o walk_pixel.gif
+pixelate batch ./photos -o ./out --preset pico8-postcard --jobs 4
 pixelate sheet ./frames --cols 8 -o sheet.png --palette gameboy
-pixelate sheet a.png b.png c.png --cols 3 --no-convert -o stitch.png
-```
-
-### Render to ASCII
-
-```bash
 pixelate ascii photo.jpg --width 120 --ramp blocks
-pixelate ascii photo.jpg --no-color -o art.txt
 ```
 
-### Browse palettes
+Every convert option (presets and hardware modes included) also works for animations, batch and sheets.
 
-```bash
-pixelate palettes          # list all built-in palettes
-pixelate preview pico8     # print a color swatch
-pixelate preview cyberpunk
-pixelate preview sweetie16
-pixelate preview macintosh
-```
+## Dithers
 
-### Web playground
+| Name | Family | Look |
+|------|--------|------|
+| `none` | — | nearest color only |
+| `floyd`, `atkinson`, `stucki`, `burkes`, `sierra`, `sierra3`, `sierra-lite`, `jjn` | error diffusion (serpentine) | organic noise; Atkinson keeps contrast |
+| `bayer` | ordered threshold (`--bayer-size 2/4/8`) | classic crosshatch |
+| `pattern` | Knoll pattern dither over Bayer 8×8 | clean, palette-aware crosshatch |
+| `bluenoise` | Knoll pattern dither over blue noise | grain-free, no visible grid |
+| `halftone` | Knoll pattern dither over clustered dots | newsprint / comic dots |
 
-Open `web/index.html` locally (or the GitHub Pages deploy). Drop an image onto the lab, pick a palette / dither / downscale filter, toggle serpentine / phosphor, posterize, compare two palettes, download a PNG. Processing is entirely in the browser.
+`pixelate dithers` prints this list from the CLI.
+
+## Performance
+
+Warm timings on a 1600×1200 source, PICO-8 palette, Apple Silicon:
+
+| Pipeline | 2.5 | 3.0 |
+|----------|----:|----:|
+| Floyd–Steinberg, Lab, 256 px | 955 ms | 32 ms |
+| Floyd–Steinberg, Lab, 512 px | 3,887 ms | 122 ms |
+| Floyd–Steinberg, CIEDE2000, 256 px | 3,102 ms | 33 ms |
+| Atkinson, Lab, 512 px | 3,819 ms | 158 ms |
+| Blue-noise pattern, Lab, 512 px | — | 71 ms |
+
+The LUT samples cell centers of a 64³ RGB cube, so diffusion can only pick a different color than an exact search within ~2 RGB units of a boundary between two palette colors. Plain quantization (`--dither none`) still uses the exact vectorized search. CIEDE2000 tables are exact for palettes up to 32 colors.
 
 ## CLI reference
 
 ```
 pixelate convert IMAGE [OPTIONS]
   -p, --palette         built-in name or 'auto'
-      --palette-file    .hex or .gpl path (overrides --palette)
-      --colors          color count for auto palette (default 16)
-      --extract-method  kmeans | median-cut
-      --seed INT        auto-palette k-means + subsample RNG seed
-  -s, --pixel-size      Resolution of longest side (8–1024)
+      --palette-file    .hex or .gpl path
+      --colors / --extract-method / --seed     auto palette controls
+  -s, --pixel-size      long side in art pixels (8–1024)
       --downscale       box (default) | lanczos | nearest
-  -d, --dither          none | floyd | atkinson | bayer |
-                        stucki | burkes | sierra | sierra3 |
-                        sierra-lite | jjn
-  -u, --upscale         1–16 (output pixels per logical pixel)
-      --scale           1–32 extra nearest-neighbor upscale
-      --saturation      0.0–3.0 (pre-quantize boost)
-      --contrast        0.0–3.0 contrast multiplier
-      --invert          Invert colors before palette
-      --edges           Edge-aware sharpen pre-pass
-      --crt             Apply CRT bloom + vignette
-      --scanlines       Overlay horizontal scanlines
-      --phosphor        RGB phosphor column mask
-      --posterize N     Bit-crush channels to N levels (2–16)
-      --bayer-size      2 | 4 | 8 (default 4; Bayer only)
-      --colorspace / --distance
-                        lab (default, CIE76) | rgb | ciede2000
+  -d, --dither          none | floyd | atkinson | bayer | stucki | burkes | sierra |
+                        sierra3 | sierra-lite | jjn | pattern | bluenoise | halftone
+      --bayer-size      2 | 4 | 8
+      --colorspace      lab (default) | rgb | ciede2000
       --serpentine / --no-serpentine
-      --report          Print color usage table
-  -o, --output          Output path (JPEG suffixes become .png)
+  -u, --upscale         1–16          --upscaler   nearest | scale2x | scale3x | scale4x
+      --scale           1–32 extra nearest scale
+      --saturation / --contrast / --invert / --edges / --posterize N
+      --hardware        zx | c64 | c64-multi | msx | nes   (attribute clash)
+      --preset NAME     --presets-file FILE.json
+      --outline N       --outline-color HEX     --cleanup N     --grid
+      --crt  --phosphor  --scanlines  --chromatic N  --color-bleed F  --curvature F
+      --report          color usage table (+ clash summary in hardware modes)
+  -o, --output          .png .gif .webp .svg .json .h .c  (JPEG becomes PNG)
 
-pixelate compare IMAGE [OPTIONS]
-      --palettes        comma-separated names (default gameboy,nes,pico8,c64)
-      --cols N          grid columns
-      --no-label        hide captions
-  -o, --output          collage path
-
-pixelate batch INPUT_DIR -o OUTPUT_DIR [same convert options]
-  -r, --recursive       Scan subdirectories
-      --jobs N          Parallel workers (default 1; ProcessPoolExecutor when >1)
-
-pixelate sheet PATH [PATH...] [OPTIONS]
-  --cols N              Grid columns (default 4)
-  --padding N           Gap between tiles
-  --convert/--no-convert  Pixelate first (default: convert)
-  -o, --output          Output spritesheet path
-  [same palette/dither/etc options as convert]
-
-pixelate ascii IMAGE [OPTIONS]
-  -w, --width           Output width in characters
-  -r, --ramp            dense | blocks | classic | binary | <custom>
-      --color           24-bit ANSI color (default on)
-      --invert          Invert ramp (light terminals)
-  -o, --output          Save to .txt
-
+pixelate compare IMAGE --palettes a,b,hw:zx,...   [--cols N] [--no-label]
+pixelate batch DIR -o OUT [convert options] [-r] [--jobs N]
+pixelate sheet PATH... [--cols N] [--padding N] [--convert/--no-convert]
+pixelate ascii IMAGE [-w N] [-r RAMP] [--color/--no-color] [--invert]
 pixelate extract IMAGE -o FILE.gpl [--colors N] [--hex]
-pixelate palettes [--load FILE] [--register-as NAME]
-                  [--save-gpl NAME -o FILE.gpl]
+pixelate swatches PALETTE|FILE|hw:MODE [-o FILE.png] [--cols N] [--size N]
+pixelate palettes | hardware | presets | dithers
 pixelate preview PALETTE
 ```
-
-### Built-in palettes
-
-| Name | Colors | Notes |
-|------|--------|--------|
-| `gameboy` | 4 | Original DMG green-yellow |
-| `gameboy-pocket` | 4 | Pocket / Light |
-| `gameboy-color` / `gbc` | 32 | Game Boy Color sample |
-| `nes` | 16 | NES subset |
-| `c64` | 16 | Commodore 64 |
-| `vic20` / `vic-20` | 16 | Commodore VIC-20 |
-| `atari2600` / `atari-2600` | 32 | Atari 2600 TIA subset |
-| `zx` | 15 | ZX Spectrum (unique; one black) |
-| `cga` | 4 | CGA Mode 4 high intensity |
-| `pico8` | 16 | PICO-8 |
-| `apple2` | 16 | Apple II low-res |
-| `ega` | 16 | IBM EGA |
-| `msx` | 15 | MSX Screen 2 (unique; one black) |
-| `sms` / `master-system` | 16 | Sega Master System |
-| `db16` | 16 | DawnBringer 16 |
-| `sweetie16` / `sweetie-16` | 16 | Lospec Sweetie 16 |
-| `endesga32` / `endesga-32` | 32 | Endesga 32 |
-| `macintosh` | 16 | Apple Macintosh System 16-color |
-| `vaporwave` | 12 | Aesthetic neon |
-| `tokyo-night` / `tokyo` | 16 | Tokyo Night theme |
-| `cyberpunk` | 16 | Neon cyberpunk night |
-| `sunset` | 8 | Modern gradient |
-| `mono-green` / `mono-amber` | 5 | Phosphor CRTs |
-| `grayscale` | 9 | Neutral steps |
 
 ## Python API
 
 ```python
-from pixelate import (
-    pixelate_image,
-    pixelate_animation,
-    extract_palette,
-    compare_palettes,
-    color_usage_report,
-    register_palette,
-    load_palette_file,
-    srgb_to_lab,
-    lab_to_srgb,
-    ciede2000,
-    dither_image,
-    save_gpl,
-    save_hex,
-)
+from pixelate import pixelate_image, save_image, apply_hardware, palette_lut, to_svg
 
-img = pixelate_image(
-    "photo.jpg",
-    palette="pico8",
-    pixel_size=128,
-    dither="jjn",
-    colorspace="lab",
-    downscale="box",
-    serpentine=True,
-    upscale=4,
-    scale=2,
-    edges=True,
-    contrast=1.1,
-    crt=True,
-    phosphor=True,
-    scanlines=True,
-    posterize=8,
-    bayer_size=4,
-)
-img.save("output.png")
+img = pixelate_image("photo.jpg", palette="pico8", dither="bluenoise", upscale=4)
+img.save("out.png")
 
-# Auto palette from image
-auto_colors = extract_palette("photo.jpg", n=12, method="kmeans", seed=1)
-img = pixelate_image("photo.jpg", palette="auto", colors=12, seed=1)
+# Hardware attribute clash, any dither
+zx = pixelate_image("photo.jpg", hardware="zx", dither="pattern")
+print(zx.info["pixelate_hardware"])   # cells, distinct cell sets, colors used
 
-# Compare collage
-grid = compare_palettes("photo.jpg", ["gameboy", "nes", "pico8", "c64"])
-grid.save("compare.png")
+# Presets: explicit (non-default) arguments win
+art = pixelate_image("photo.jpg", preset="c64-demo", pixel_size=200)
 
-# Color usage after convert
-report = color_usage_report(img, palette=auto_colors)
-for color, count, pct in report:
-    print(color, count, f"{pct:.1f}%")
+# The logical index map and palette ride along for exports
+save_image(art, "art.svg")            # also .json / .h / .c
+idx, pal = art.info["pixelate_indices"], art.info["pixelate_palette"]
 
-# Custom palette file
-img = pixelate_image("photo.jpg", palette_file="my.gpl", dither="burkes")
-
-# Or register for reuse
-register_palette("neon", load_palette_file("neon.hex"))
-img = pixelate_image("photo.jpg", palette="neon")
-
-# Animation
-from pixelate import pixelate_animation
-pixelate_animation("walk.gif", palette="gameboy", output="walk_pixel.gif")
+# Lower level
+from pixelate import dither_indices, upscale_image, swatch_sheet
+lut = palette_lut([(0, 0, 0), (255, 255, 255)], space="lab")
+lut.index(120, 130, 140)
 ```
 
-```python
-from pixelate.ascii_art import image_to_ascii
+Everything from 2.x (`pixelate_animation`, `extract_palette`, `compare_palettes`, `color_usage_report`, `register_palette`, `srgb_to_lab`, `ciede2000`, …) is unchanged.
 
-print(image_to_ascii("photo.jpg", width=80, ramp="blocks", color=True))
-```
+## Web Studio
 
-```python
-from pixelate.core import make_spritesheet, collect_images, pixelate_image
-from PIL import Image
-
-paths = collect_images(["./sprites"])
-tiles = [pixelate_image(p, palette="db16", pixel_size=32, upscale=2) for p in paths]
-sheet = make_spritesheet(tiles, cols=8)
-sheet.save("sheet.png")
-```
+[`web/`](web/) is a static app (no build step) published to GitHub Pages. Its engine (`web/engine.js`) is a port of the Python algorithms and runs in a Web Worker; palettes, kernels, presets and hardware specs come from `web/data.json`, generated by `python tools/build_web_data.py` so the two never drift (CI fails if it is stale). Open `web/index.html` directly or serve the folder.
 
 ## How it works
 
-1. **Pre-process (optional)** — invert, contrast, saturation, edge-aware sharpen, posterize.
-2. **Resize** — the source is downsampled with a **box (area) filter** by default (authentic pixel art). Lanczos blurs before quantize; nearest is point-sample. You control the long-side size with `pixel_size`.
-3. **Palette** — built-in name, custom file, RGB sequence, or **auto** extract via Lab k-means++ / median-cut.
-4. **Quantize** — every pixel is matched against the chosen palette using CIE76 Lab (default), Euclidean RGB, or CIEDE2000.
-5. **Dither** — quantization error is spread with serpentine kernels (Floyd-Steinberg, Atkinson, Stucki, Burkes, Sierra-2, Sierra-3, Sierra Lite, JJN) or hidden in a Bayer pattern (`--bayer-size`).
-6. **Upscale** — the small image is enlarged with nearest-neighbor so the pixels stay crisp and chunky (`upscale`, then optional extra `--scale`).
-7. **Effects (optional)** — CRT bloom, then phosphor mask, then scanlines (scanlines stay sharp).
-8. **Animation** — multi-frame sources run the pipeline per frame, then reassemble with original durations.
-
-## Tests & CI
-
-```bash
-pip install -e ".[dev]"
-pytest
-```
-
-GitHub Actions runs pytest on Python 3.9–3.13 (see `.github/workflows/ci.yml`). The playground is published from `web/` via `.github/workflows/pages.yml`.
+1. **Pre-process** — EXIF orientation, invert / contrast / saturation / edge pass.
+2. **Downscale** — box (area) filter to the target long side; wide-pixel modes halve the width.
+3. **Palette** — built-in, file, auto (Lab k-means++ / median cut) or the hardware palette.
+4. **Quantize to indices** — exact search, LUT-backed error diffusion, threshold or pattern dithering; in hardware modes, per-cell legal color sets first.
+5. **Clean up** — orphan pixels, palette-locked outline.
+6. **Upscale** — nearest or Scale2x/3x.
+7. **Effects** — grid, CRT bloom, chroma bleed, RGB split, phosphor, scanlines, curvature.
+8. **Save** — indexed PNG when palette-locked, shared-palette GIF, or SVG / JSON / C export.
 
 ## Project layout
 
 ```
 pixelate/
 ├── pixelate/
-│   ├── __init__.py
-│   ├── __main__.py
-│   ├── cli.py          # Click CLI (convert, compare, batch, sheet, extract, ascii, palettes)
-│   ├── core.py         # Conversion pipeline, auto palette, compare, report, indexed I/O
-│   ├── colorspace.py   # sRGB ↔ Lab, CIEDE2000, nearest-palette indices
-│   ├── animation.py    # Multi-frame GIF/WebP (shared P palette)
-│   ├── palette_io.py   # .hex / .gpl load + save + register_palette
-│   ├── palettes.py     # Built-in retro palettes
-│   ├── dithering.py    # FS, Atkinson, Bayer, Stucki, Burkes, Sierra-2/3/Lite, JJN
-│   ├── effects.py      # CRT bloom, phosphor, scanlines
-│   ├── ascii_art.py    # ASCII / ANSI rendering
-│   └── ui.py           # Rich-styled banner + tables
-├── web/                # Static playground (GitHub Pages)
-├── tests/
-├── .github/workflows/ci.yml
-├── .github/workflows/pages.yml
-├── pyproject.toml
-├── requirements.txt
-├── CHANGELOG.md
-├── LICENSE
-└── README.md
+│   ├── cli.py          # Click CLI
+│   ├── core.py         # pipeline, auto palette, compare, report, save/export dispatch
+│   ├── dithering.py    # diffusion engine, Bayer, Knoll pattern / blue noise / halftone
+│   ├── lut.py          # cached nearest-palette lookup tables
+│   ├── hardware.py     # attribute-clash modes (ZX, C64, MSX, NES)
+│   ├── presets.py      # named recipes + JSON presets
+│   ├── export.py       # SVG / JSON / C header / swatch sheets
+│   ├── upscale.py      # Scale2x / Scale3x
+│   ├── effects.py      # CRT, phosphor, scanlines, curvature, bleed, outline, grid, cleanup
+│   ├── colorspace.py   # sRGB ↔ Lab, CIEDE2000
+│   ├── animation.py    # GIF / WebP frames
+│   ├── palettes.py · palette_io.py · ascii_art.py · ui.py
+├── web/                # PIXELATE Studio (GitHub Pages)
+├── tools/build_web_data.py
+└── tests/
 ```
-
-## Roadmap
-
-- [x] Animated GIF input/output
-- [x] Custom palette files (.gpl / .hex)
-- [x] Sprite sheet export
-- [x] More dithering kernels (Stucki, Burkes, Sierra)
-- [x] Batch convert
-- [x] More built-in palettes (EGA, MSX, SMS, DB16, vaporwave, GBC, VIC-20, Atari, Tokyo Night, cyberpunk)
-- [x] Palette extraction from source images
-- [x] Multi-palette compare collage
-- [x] Color usage report
-- [x] Web playground
-- [x] Optional LAB / perceptual color distance (CIE76, default)
-- [x] k-means++ auto palette, phosphor mask, Bayer size, posterize pre-pass
-- [x] Lab-space k-means, `--seed`, batch `--jobs`, web phosphor/posterize
-- [x] Box downscale, CIEDE2000, Sierra-3 / Sierra Lite, seeded subsample, process-pool batch
 
 ## License
 
